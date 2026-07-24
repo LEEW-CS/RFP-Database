@@ -76,4 +76,17 @@
 
   /* status badge colour map (uses DS badge variants via JS, this is just spacing) */
   .rfp-badge-row { display: flex; gap: var(--space-2xs); flex-wrap: wrap; }
+
+  /* ---- Modal centred inside the fixed overlay ---- */
+  .rfp-modal {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: min(42rem, 94vw); max-height: 90vh; overflow: auto;
+  }
+
+  /* ---- Edit affordances in the drawer ---- */
+  .rfp-edit-card { border: 1px solid var(--color-border-subtle); border-radius: var(--radius-lg, 12px); padding: var(--space-md); }
+  .rfp-answer-edit { width: 100%; min-height: 12rem; }
+  .rfp-ver-item { padding: var(--space-sm) 0; border-top: 1px solid var(--color-border-subtle); }
+  .rfp-ver-item:first-child { border-top: 0; }
+  .rfp-ver-ans { white-space: pre-wrap; color: var(--color-text-secondary); font-size: var(--font-size-sm); margin-top: 4px; }
 }

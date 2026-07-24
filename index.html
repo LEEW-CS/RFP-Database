@@ -106,6 +106,9 @@
                 <h1>Q&amp;A Browser</h1>
                 <p class="text-secondary" id="browser-summary">Loading…</p>
               </div>
+              <button id="new-q-btn" class="button button-primary" hidden>
+                <i class="fa-solid fa-plus"></i> New question
+              </button>
             </header>
 
             <div class="rfp-toolbar">
@@ -220,6 +223,50 @@
       </header>
       <div class="drawer-body stack-lg" id="drawer-body"><!-- filled by JS --></div>
     </aside>
+  </div>
+
+  <!-- ===================== NEW QUESTION MODAL ===================== -->
+  <div class="rfp-overlay" id="newq-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-newq-close></div>
+    <div class="modal modal-md rfp-modal" role="dialog" aria-label="New question">
+      <header class="modal-header">
+        <h3>New canonical question</h3>
+        <button class="modal-close" data-newq-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md">
+        <div class="field">
+          <label class="field-label" for="newq-cat">Category</label>
+          <select class="select" id="newq-cat"></select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="newq-question">Question</label>
+          <textarea class="textarea" id="newq-question" rows="3" placeholder="Write a clean, client-agnostic standard question…"></textarea>
+        </div>
+        <div class="cluster cluster-sm">
+          <div class="field flex-1">
+            <label class="field-label" for="newq-tier">Tier</label>
+            <select class="select" id="newq-tier"><option>Client</option><option>Internal</option></select>
+          </div>
+          <div class="field flex-1">
+            <label class="field-label" for="newq-status">Status</label>
+            <select class="select" id="newq-status">
+              <option value="approved">Approved</option>
+              <option value="approved-blank">Needs answer</option>
+              <option value="edit-pending">Edit pending</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="newq-answer">Answer (optional)</label>
+          <textarea class="textarea" id="newq-answer" rows="6" placeholder="Leave blank to fill in later."></textarea>
+        </div>
+        <div id="newq-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-newq-close>Cancel</button>
+        <button class="button button-primary" id="newq-save">Create question</button>
+      </footer>
+    </div>
   </div>
 
   <!-- ===================== TOASTS ===================== -->
