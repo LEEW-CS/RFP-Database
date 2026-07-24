@@ -22,8 +22,14 @@
   .rfp-login-brand { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
   .rfp-login-title { margin: 0; }
 
+  /* ---- App shell: pin to viewport so the main area scrolls, not the page ---- */
+  .app-shell { height: 100dvh; overflow: hidden; }
+  .app-sidebar { height: 100dvh; display: flex; flex-direction: column; }
+  .app-sidebar-nav { flex: 1 1 auto; overflow-y: auto; }
+  .app-main { height: 100dvh; overflow-y: auto; }
+
   /* ---- App shell footer / user box ---- */
-  .app-sidebar-footer { padding-top: var(--space-md); }
+  .app-sidebar-footer { padding-top: var(--space-md); flex: 0 0 auto; }
   .rfp-userbox { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
   .rfp-userbox-info { display: flex; flex-direction: column; min-width: 0; }
   .rfp-userbox-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
