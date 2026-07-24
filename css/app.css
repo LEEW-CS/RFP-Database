@@ -62,6 +62,9 @@
   .rfp-drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(46rem, 100%);
                 display: flex; flex-direction: column; animation: rfp-slide-in .18s ease; }
   @keyframes rfp-slide-in { from { transform: translateX(1.5rem); opacity: .6; } to { transform: none; opacity: 1; } }
+  /* make the drawer body the scrolling region so long answers never run off-screen */
+  .rfp-drawer .drawer-header { flex: 0 0 auto; }
+  .rfp-drawer .drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .rfp-drawer-id { font-size: var(--font-size-sm); }
   .rfp-answer { white-space: pre-wrap; line-height: 1.6; }
   .rfp-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--space-md); }
@@ -89,4 +92,10 @@
   .rfp-ver-item { padding: var(--space-sm) 0; border-top: 1px solid var(--color-border-subtle); }
   .rfp-ver-item:first-child { border-top: 0; }
   .rfp-ver-ans { white-space: pre-wrap; color: var(--color-text-secondary); font-size: var(--font-size-sm); margin-top: 4px; }
+
+  /* ---- Version label ---- */
+  .rfp-version { font-size: .72rem; margin: 0; opacity: .8; }
+  .rfp-login-card .rfp-version { text-align: center; }
+  .app-sidebar-footer .rfp-version { text-align: left; }
+  .is-collapsed .app-sidebar-footer .rfp-version { display: none; }
 }

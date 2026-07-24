@@ -6,6 +6,8 @@
 (function () {
   "use strict";
 
+  const APP_VERSION = "v0.4.0";
+
   const cfg = window.RFP_CONFIG || {};
   const configured =
     cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY &&
@@ -61,8 +63,12 @@
   const catIdByName = (name) => { const c = state.categories.find(c => c.name === name); return c ? c.id : -1; };
   const canEdit = (row) => isAdmin() || state.myCategoryIds.has(catIdByName(row.category));
 
+  function setVersion() {
+    ["#app-version-login", "#app-version-side"].forEach(sel => { const n = $(sel); if (n) n.textContent = APP_VERSION; });
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
-    initTheme(); wireStaticHandlers();
+    initTheme(); setVersion(); wireStaticHandlers();
     if (!configured) { $("#config-warning").hidden = false; showLogin(); return; }
     state.sb = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
     const { data: { session } } = await state.sb.auth.getSession();
