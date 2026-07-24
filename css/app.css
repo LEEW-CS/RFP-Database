@@ -2,6 +2,12 @@
    Cloudstaff RFP Builder — app-layer styles (win over the design system)
    All colours use design-system tokens so partner rebrand + dark mode cascade.
    ========================================================================== */
+
+/* Unlayered so it beats the design system's display rules: the [hidden]
+   attribute must always win, otherwise .app-shell / .rfp-login / .alert etc.
+   set their own `display` and nothing ever hides. */
+[hidden] { display: none !important; }
+
 @layer app {
 
   /* ---- Login ---- */
