@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.4.2";
+  const APP_VERSION = "v0.4.3";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -185,7 +185,7 @@
     const rows = filteredQuestions();
     const tbody = $("#qa-rows"); tbody.innerHTML = "";
     $("#qa-empty").hidden = rows.length > 0;
-    $("#browser-summary").textContent = `${rows.length} of ${state.questions.length} canonical questions · ${state.categories.length} categories`;
+    $("#browser-summary").textContent = `${rows.length} of ${state.questions.length} consolidated questions · ${state.categories.length} categories`;
     rows.forEach(row => {
       const tr = el("tr"); const cnt = state.provCounts[row.id] || 0;
       tr.innerHTML =
@@ -251,7 +251,7 @@
       answerArea = `
         <div class="stack-sm">
           <div class="cluster" style="justify-content:space-between">
-            <h4>Canonical answer</h4>
+            <h4>Consolidated answer</h4>
             ${editable ? `<button class="button button-secondary button-sm" data-edit-answer><i class="fa-solid fa-pen"></i> Edit</button>` : ""}
           </div>
           ${answerHtml}
