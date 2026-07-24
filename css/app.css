@@ -1,0 +1,73 @@
+/* ==========================================================================
+   Cloudstaff RFP Builder — app-layer styles (win over the design system)
+   All colours use design-system tokens so partner rebrand + dark mode cascade.
+   ========================================================================== */
+@layer app {
+
+  /* ---- Login ---- */
+  .rfp-login {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: var(--space-lg);
+    background: var(--gradient-subtle, var(--color-background-secondary));
+  }
+  .rfp-login-card { width: min(26rem, 100%); padding: var(--space-2xl); }
+  .rfp-login-brand { display: flex; align-items: center; gap: var(--space-sm); flex-wrap: wrap; }
+  .rfp-login-title { margin: 0; }
+
+  /* ---- App shell footer / user box ---- */
+  .app-sidebar-footer { padding-top: var(--space-md); }
+  .rfp-userbox { display: flex; align-items: center; gap: var(--space-sm); min-width: 0; }
+  .rfp-userbox-info { display: flex; flex-direction: column; min-width: 0; }
+  .rfp-userbox-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .is-collapsed .rfp-userbox-info,
+  .is-collapsed .app-sidebar-footer .button .fa-arrow-right-from-bracket + * { display: none; }
+
+  .rfp-nav-count { margin-left: auto; }
+
+  /* ---- Page head ---- */
+  .rfp-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap; }
+
+  /* ---- Toolbar ---- */
+  .rfp-toolbar {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1fr) repeat(3, minmax(9rem, auto));
+    gap: var(--space-sm);
+    align-items: center;
+  }
+  .rfp-search { width: 100%; }
+  @media (max-width: 820px) {
+    .rfp-toolbar { grid-template-columns: 1fr 1fr; }
+    .rfp-search { grid-column: 1 / -1; }
+  }
+
+  /* ---- Q&A table ---- */
+  .rfp-qa-table tbody tr { cursor: pointer; }
+  .rfp-qa-table tbody tr:hover { background: var(--color-background-secondary); }
+  .rfp-qa-q { font-weight: 600; }
+  .rfp-qa-q small { display: block; font-weight: 400; color: var(--color-text-secondary); margin-top: 2px;
+                    overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+  .rfp-src-count { font-variant-numeric: tabular-nums; }
+
+  /* ---- Detail drawer ---- */
+  .rfp-overlay { position: fixed; inset: 0; z-index: 60; }
+  .rfp-overlay-backdrop { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-text-primary) 45%, transparent); }
+  .rfp-drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(46rem, 100%);
+                display: flex; flex-direction: column; animation: rfp-slide-in .18s ease; }
+  @keyframes rfp-slide-in { from { transform: translateX(1.5rem); opacity: .6; } to { transform: none; opacity: 1; } }
+  .rfp-drawer-id { font-size: var(--font-size-sm); }
+  .rfp-answer { white-space: pre-wrap; line-height: 1.6; }
+  .rfp-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--space-md); }
+  .rfp-kv dt { color: var(--color-text-secondary); }
+  .rfp-prov-item { padding: var(--space-sm) 0; border-top: 1px solid var(--color-border-subtle); }
+  .rfp-prov-item:first-child { border-top: 0; }
+  .rfp-prov-src { font-weight: 600; }
+  .rfp-prov-q { color: var(--color-text-secondary); }
+
+  /* ---- Stats row ---- */
+  @media (max-width: 900px) { .rfp-stats { grid-template-columns: 1fr 1fr; } }
+
+  /* status badge colour map (uses DS badge variants via JS, this is just spacing) */
+  .rfp-badge-row { display: flex; gap: var(--space-2xs); flex-wrap: wrap; }
+}

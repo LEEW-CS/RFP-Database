@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cloudstaff RFP Builder</title>
+
+  <!-- Cascade layer order so our app rules win cleanly over the design system -->
+  <style>@layer reset, foundation, theme, semantic, component-tokens, layout, typography, components, utilities, app;</style>
+
+  <!-- Cloudstaff Design System -->
+  <link rel="stylesheet" href="https://style.cloudstaff.com/v2.38.0/css/ui.min.css">
+  <!-- Font Awesome 6 (icons used by DS components) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <!-- App overrides -->
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body class="application">
+
+  <!-- ===================== LOGIN ===================== -->
+  <section id="login-view" class="rfp-login" hidden>
+    <div class="card rfp-login-card stack-lg">
+      <div class="rfp-login-brand">
+        <img src="https://style.stage.cloud.cloudstaff.com/assets/logos/cloudstaff-logo-landscape.svg"
+             alt="Cloudstaff" height="40">
+        <span class="brand-sub-label">RFP Builder</span>
+      </div>
+      <div class="stack-2xs">
+        <h1 class="rfp-login-title">Sign in</h1>
+        <p class="text-secondary">RFP Q&amp;A knowledge base &amp; DRI attestation.</p>
+      </div>
+
+      <div id="config-warning" class="alert alert-warning" hidden>
+        <i class="alert-icon fa-solid fa-triangle-exclamation"></i>
+        <div>
+          <strong>Not configured yet.</strong>
+          <span>Add your Supabase Project URL and anon key in <code>js/config.js</code>, then reload.</span>
+        </div>
+      </div>
+
+      <form id="login-form" class="stack-md">
+        <div class="field">
+          <label class="field-label" for="email">Email</label>
+          <input class="input" id="email" type="email" autocomplete="username" placeholder="driuser1@cloudstaff.com" required>
+        </div>
+        <div class="field">
+          <label class="field-label" for="password">Password</label>
+          <input class="input" id="password" type="password" autocomplete="current-password" required>
+        </div>
+        <div id="login-error" class="field-error" hidden></div>
+        <button id="login-btn" class="button button-primary button-block" type="submit">Sign in</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- ===================== APP SHELL ===================== -->
+  <div id="app-shell" class="app-shell" hidden>
+    <aside class="app-sidebar" aria-label="Primary">
+      <header class="app-sidebar-header">
+        <a class="brand-lockup" href="#/browser">
+          <img src="https://style.stage.cloud.cloudstaff.com/assets/logos/cloudstaff-logo-landscape.svg"
+               alt="Cloudstaff" height="30">
+        </a>
+        <button class="app-sidebar-toggle" data-collapse aria-label="Collapse sidebar">
+          <i class="fa-solid fa-chevron-left"></i>
+        </button>
+      </header>
+      <nav class="app-sidebar-nav">
+        <a href="#/browser" data-nav="browser" class="is-active">
+          <i class="fa-solid fa-layer-group fa-fw"></i>
+          <span class="app-sidebar-label">Q&amp;A Browser</span>
+        </a>
+        <a href="#/attest" data-nav="attest">
+          <i class="fa-solid fa-clipboard-check fa-fw"></i>
+          <span class="app-sidebar-label">My Attestations</span>
+          <span class="badge badge-brand badge-sm rfp-nav-count" id="attest-nav-count" hidden></span>
+        </a>
+      </nav>
+      <footer class="app-sidebar-footer stack-sm">
+        <div class="rfp-userbox">
+          <span class="avatar avatar-sm" id="user-avatar">–</span>
+          <div class="rfp-userbox-info">
+            <span class="rfp-userbox-name" id="user-name">–</span>
+            <span class="rfp-userbox-role text-secondary text-xs" id="user-role">–</span>
+          </div>
+        </div>
+        <div class="cluster cluster-sm">
+          <button class="button button-tertiary button-sm" id="theme-toggle" aria-label="Toggle theme">
+            <i class="fa-solid fa-moon"></i>
+          </button>
+          <button class="button button-secondary button-sm flex-1" id="signout-btn">
+            <i class="fa-solid fa-arrow-right-from-bracket"></i> Sign out
+          </button>
+        </div>
+      </footer>
+    </aside>
+
+    <main class="app-main">
+      <div class="page">
+        <div class="container-wide stack-xl">
+
+          <!-- ---------- Q&A BROWSER ---------- -->
+          <section id="browser-view" class="stack-lg">
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>Q&amp;A Browser</h1>
+                <p class="text-secondary" id="browser-summary">Loading…</p>
+              </div>
+            </header>
+
+            <div class="rfp-toolbar">
+              <div class="search-input-wrap rfp-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input class="input" id="search" type="search" placeholder="Search questions and answers…">
+              </div>
+              <select class="select" id="filter-category" aria-label="Category">
+                <option value="">All categories</option>
+              </select>
+              <select class="select" id="filter-status" aria-label="Status">
+                <option value="">All statuses</option>
+                <option value="approved">Approved</option>
+                <option value="approved-blank">Approved (blank)</option>
+                <option value="edit-pending">Edit pending</option>
+                <option value="sample-only">Sample only</option>
+              </select>
+              <select class="select" id="filter-tier" aria-label="Tier">
+                <option value="">All tiers</option>
+                <option value="Client">Client</option>
+                <option value="Internal">Internal</option>
+              </select>
+            </div>
+
+            <div class="table-wrap rfp-table-wrap">
+              <table class="table rfp-qa-table">
+                <thead>
+                  <tr>
+                    <th style="width:5.5rem">ID</th>
+                    <th>Question</th>
+                    <th style="width:11rem">Category</th>
+                    <th style="width:6rem">Tier</th>
+                    <th style="width:8.5rem">Status</th>
+                    <th style="width:5rem" class="text-center">Sources</th>
+                  </tr>
+                </thead>
+                <tbody id="qa-rows"></tbody>
+              </table>
+            </div>
+            <div id="qa-empty" class="empty-state" hidden>
+              <span class="empty-state-icon"><i class="fa-solid fa-magnifying-glass"></i></span>
+              <h4>No matching questions</h4>
+              <p>Try clearing a filter or search term.</p>
+            </div>
+          </section>
+
+          <!-- ---------- ATTESTATIONS ---------- -->
+          <section id="attest-view" class="stack-lg" hidden>
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>My Attestations</h1>
+                <p class="text-secondary" id="attest-summary">The questions in the categories you own as DRI.</p>
+              </div>
+            </header>
+
+            <div class="grid-4 rfp-stats">
+              <div class="stat-tile stat-tile-illustrated">
+                <div class="stat-tile-body"><p class="stat-tile-label">My questions</p><p class="stat-tile-value" id="stat-owned">0</p></div>
+                <div class="stat-tile-icon is-brand"><i class="fa-solid fa-layer-group"></i></div>
+              </div>
+              <div class="stat-tile stat-tile-illustrated">
+                <div class="stat-tile-body"><p class="stat-tile-label">Confirmed this month</p><p class="stat-tile-value" id="stat-attested">0</p></div>
+                <div class="stat-tile-icon is-success"><i class="fa-solid fa-circle-check"></i></div>
+              </div>
+              <div class="stat-tile stat-tile-illustrated">
+                <div class="stat-tile-body"><p class="stat-tile-label">Needs an answer</p><p class="stat-tile-value" id="stat-blank">0</p></div>
+                <div class="stat-tile-icon is-warning"><i class="fa-solid fa-pen"></i></div>
+              </div>
+              <div class="stat-tile stat-tile-illustrated">
+                <div class="stat-tile-body"><p class="stat-tile-label">Awaiting confirmation</p><p class="stat-tile-value" id="stat-due">0</p></div>
+                <div class="stat-tile-icon is-danger"><i class="fa-solid fa-clock"></i></div>
+              </div>
+            </div>
+
+            <div id="attest-not-dri" class="empty-state" hidden>
+              <span class="empty-state-icon"><i class="fa-solid fa-user-shield"></i></span>
+              <h4>No categories assigned to you</h4>
+              <p>You're not currently a DRI for any category. Ask an admin to assign you in the DRI mapping.</p>
+            </div>
+
+            <div class="table-wrap rfp-table-wrap" id="attest-table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th style="width:5.5rem">ID</th>
+                    <th>Question</th>
+                    <th style="width:8.5rem">Status</th>
+                    <th style="width:9rem">Last confirmed</th>
+                    <th style="width:15rem" class="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="attest-rows"></tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== DETAIL DRAWER ===================== -->
+  <div class="rfp-overlay" id="drawer-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-drawer-close></div>
+    <aside class="drawer is-floating rfp-drawer" role="dialog" aria-label="Question detail">
+      <header class="drawer-header">
+        <div class="cluster cluster-sm">
+          <code class="rfp-drawer-id" id="d-id">–</code>
+          <span id="d-badges" class="cluster cluster-sm"></span>
+        </div>
+        <button class="button-icon-only" data-drawer-close aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+      </header>
+      <div class="drawer-body stack-lg" id="drawer-body"><!-- filled by JS --></div>
+    </aside>
+  </div>
+
+  <!-- ===================== TOASTS ===================== -->
+  <div class="toast-stack" id="toast-stack"></div>
+
+  <!-- Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js" defer></script>
+</body>
+</html>
