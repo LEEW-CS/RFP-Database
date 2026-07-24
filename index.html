@@ -76,6 +76,10 @@
           <i class="fa-solid fa-layer-group fa-fw"></i>
           <span class="app-sidebar-label">Q&amp;A Browser</span>
         </a>
+        <a href="#/import" data-nav="import">
+          <i class="fa-solid fa-file-import fa-fw"></i>
+          <span class="app-sidebar-label">New RFP</span>
+        </a>
       </nav>
       <footer class="app-sidebar-footer stack-sm">
         <div class="rfp-userbox">
@@ -207,6 +211,112 @@
             </div>
           </section>
 
+          <!-- ---------- NEW RFP (upload + auto-match) ---------- -->
+          <section id="import-view" class="stack-lg" hidden>
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>New RFP</h1>
+                <p class="text-secondary" id="import-summary">Upload an RFP/RFI spreadsheet — we match each question against the knowledge base and draft the response for you.</p>
+              </div>
+              <button class="button button-tertiary" id="import-reset" hidden><i class="fa-solid fa-rotate-left"></i> Start over</button>
+            </header>
+
+            <!-- STEP 1: upload -->
+            <div id="import-step-upload" class="stack-md">
+              <div class="rfp-dropzone" id="import-dropzone" role="button" tabindex="0" aria-label="Upload spreadsheet">
+                <i class="fa-solid fa-file-arrow-up rfp-dropzone-icon"></i>
+                <p class="rfp-dropzone-lead"><strong>Drop an RFP spreadsheet here</strong> or click to browse</p>
+                <p class="text-secondary text-sm">.xlsx, .xls or .csv — questions can be in any column</p>
+                <input type="file" id="import-file" accept=".xlsx,.xls,.csv,.xlsm" hidden>
+              </div>
+              <div id="import-parse-error" class="alert alert-danger" hidden>
+                <i class="alert-icon fa-solid fa-triangle-exclamation"></i><span></span>
+              </div>
+            </div>
+
+            <!-- STEP 2: configure -->
+            <div id="import-step-config" class="card stack-md" hidden>
+              <div class="stack-2xs">
+                <h4 id="import-file-name">—</h4>
+                <p class="text-secondary text-sm" id="import-config-hint">Tell us where the questions are, then match.</p>
+              </div>
+              <div class="rfp-config-grid">
+                <div class="field"><label class="field-label" for="import-sheet">Sheet</label><select class="select" id="import-sheet"></select></div>
+                <div class="field"><label class="field-label" for="import-headerrow">Header row</label><select class="select" id="import-headerrow"></select></div>
+                <div class="field"><label class="field-label" for="import-qcol">Question column</label><select class="select" id="import-qcol"></select></div>
+                <div class="field"><label class="field-label" for="import-acol">Write answers to</label><select class="select" id="import-acol"></select></div>
+              </div>
+              <div class="rfp-preview-wrap">
+                <table class="table rfp-preview-table"><tbody id="import-preview"></tbody></table>
+              </div>
+              <div class="cluster" style="justify-content:flex-end">
+                <button class="button button-primary" id="import-run"><i class="fa-solid fa-wand-magic-sparkles"></i> Match questions</button>
+              </div>
+            </div>
+
+            <!-- STEP 3: review -->
+            <div id="import-step-review" class="stack-lg" hidden>
+              <div class="grid-4 rfp-stats">
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Questions found</p><p class="stat-tile-value" id="imp-stat-total">0</p></div>
+                  <div class="stat-tile-icon is-brand"><i class="fa-solid fa-list-ol"></i></div>
+                </div>
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Strong matches</p><p class="stat-tile-value" id="imp-stat-strong">0</p></div>
+                  <div class="stat-tile-icon is-success"><i class="fa-solid fa-circle-check"></i></div>
+                </div>
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Partial — review</p><p class="stat-tile-value" id="imp-stat-partial">0</p></div>
+                  <div class="stat-tile-icon is-warning"><i class="fa-solid fa-circle-half-stroke"></i></div>
+                </div>
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Gaps — no match</p><p class="stat-tile-value" id="imp-stat-gap">0</p></div>
+                  <div class="stat-tile-icon is-danger"><i class="fa-solid fa-circle-question"></i></div>
+                </div>
+              </div>
+
+              <div class="rfp-toolbar">
+                <div class="search-input-wrap rfp-search">
+                  <i class="fa-solid fa-magnifying-glass"></i>
+                  <input class="input" id="import-search" type="search" placeholder="Filter RFP questions…">
+                </div>
+                <select class="select" id="import-filter-band" aria-label="Match quality">
+                  <option value="">All matches</option>
+                  <option value="strong">Strong only</option>
+                  <option value="partial">Partial only</option>
+                  <option value="gap">Gaps only</option>
+                  <option value="included">Included in export</option>
+                </select>
+              </div>
+
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table rfp-import-table">
+                  <thead>
+                    <tr>
+                      <th style="width:3rem">#</th>
+                      <th style="width:26%">RFP question</th>
+                      <th style="width:22%">Best KB match</th>
+                      <th>Answer to use</th>
+                      <th style="width:5rem" class="text-center">Include</th>
+                    </tr>
+                  </thead>
+                  <tbody id="import-rows"></tbody>
+                </table>
+              </div>
+
+              <div class="rfp-import-actions card">
+                <div class="stack-2xs">
+                  <strong id="import-action-summary">—</strong>
+                  <span class="text-secondary text-sm" id="import-action-sub"></span>
+                </div>
+                <div class="cluster cluster-sm">
+                  <button class="button button-secondary" id="import-download"><i class="fa-solid fa-file-excel"></i> Download filled spreadsheet</button>
+                  <button class="button button-primary" id="import-pushkb" hidden><i class="fa-solid fa-database"></i> Add gaps to knowledge base</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
         </div>
       </div>
     </main>
@@ -271,12 +381,32 @@
     </div>
   </div>
 
+  <!-- ===================== ADD-TO-KB MODAL ===================== -->
+  <div class="rfp-overlay" id="kb-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-kb-close></div>
+    <div class="modal modal-lg rfp-modal rfp-kb-modal" role="dialog" aria-label="Add to knowledge base">
+      <header class="modal-header">
+        <h3>Add new questions to the knowledge base</h3>
+        <button class="modal-close" data-kb-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md" id="kb-body"><!-- filled by JS --></div>
+      <div id="kb-error" class="field-error" hidden style="padding:0 var(--space-lg)"></div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-kb-close>Cancel</button>
+        <button class="button button-primary" id="kb-save"><i class="fa-solid fa-database"></i> Add selected</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- ===================== TOASTS ===================== -->
   <div class="toast-stack" id="toast-stack"></div>
 
   <!-- Supabase JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- SheetJS (spreadsheet parse + export for the New RFP workflow) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="js/config.js"></script>
+  <script src="js/match.js"></script>
   <script src="js/app.js" defer></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.4.3";
+  const APP_VERSION = "v0.5.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -55,7 +55,8 @@
     sb: null, user: null, profile: null,
     myCategoryIds: new Set(),
     questions: [], categories: [], resources: [],
-    provCounts: {}, latestAttest: {}, current: null
+    provCounts: {}, latestAttest: {}, current: null,
+    imp: null           // New-RFP import session (see import module below)
   };
 
   const isAdmin = () => (state.profile && state.profile.role === "admin");
@@ -89,6 +90,7 @@
     ["#search", "#filter-category", "#filter-status", "#filter-tier"].forEach(sel => $(sel).addEventListener("input", renderBrowser));
     $("#new-q-btn").addEventListener("click", openNewQ);
     $("#newq-save").addEventListener("click", saveNewQ);
+    wireImportHandlers();
   }
 
   async function onLogin(e) {
@@ -156,11 +158,16 @@
   function route() {
     let hash = location.hash;
     if (!hash) hash = ownedQuestions().length ? "#/attest" : "#/browser";  // DRIs land on To Do
-    const view = hash.includes("attest") ? "attest" : "browser";
+    let view = "browser";
+    if (hash.includes("attest")) view = "attest";
+    else if (hash.includes("import")) view = "import";
     $("#browser-view").hidden = view !== "browser";
     $("#attest-view").hidden = view !== "attest";
+    $("#import-view").hidden = view !== "import";
     $$("[data-nav]").forEach(a => a.classList.toggle("is-active", a.dataset.nav === view));
-    if (view === "browser") renderBrowser(); else renderAttest();
+    if (view === "browser") renderBrowser();
+    else if (view === "attest") renderAttest();
+    else renderImport();
   }
 
   function populateCategoryFilter() {
@@ -477,4 +484,362 @@
   }
 
   function fmtDate(iso) { try { if (window.ds && ds.i18n) return ds.i18n.formatDate(new Date(iso)); return new Date(iso).toLocaleDateString(); } catch (_) { return String(iso).slice(0, 10); } }
+
+  /* ========================================================================
+     NEW RFP — upload → auto-match → review → export / write-back
+     ======================================================================== */
+  const IMP_BAND = {
+    strong:  { cls: "badge-success", label: "Strong" },
+    partial: { cls: "badge-warning", label: "Partial" },
+    gap:     { cls: "badge-danger",  label: "No match" }
+  };
+  const colLetter = (n) => { let s = ""; n = n + 1; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+
+  function wireImportHandlers() {
+    const dz = $("#import-dropzone"), file = $("#import-file");
+    dz.addEventListener("click", () => file.click());
+    dz.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); file.click(); } });
+    dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("is-drag"); });
+    dz.addEventListener("dragleave", () => dz.classList.remove("is-drag"));
+    dz.addEventListener("drop", e => { e.preventDefault(); dz.classList.remove("is-drag"); if (e.dataTransfer.files[0]) onImportFile(e.dataTransfer.files[0]); });
+    file.addEventListener("change", () => { if (file.files[0]) onImportFile(file.files[0]); file.value = ""; });
+    $("#import-reset").addEventListener("click", resetImport);
+    $("#import-sheet").addEventListener("change", () => { impLoadSheet($("#import-sheet").value); });
+    $("#import-headerrow").addEventListener("change", () => { state.imp.headerRow = parseInt($("#import-headerrow").value, 10); impRefreshColumns(); });
+    $("#import-run").addEventListener("click", impRun);
+    ["#import-search", "#import-filter-band"].forEach(s => $(s).addEventListener("input", renderImportRows));
+    $("#import-download").addEventListener("click", impDownload);
+    $("#import-pushkb").addEventListener("click", openKbModal);
+    $$("[data-kb-close]").forEach(b => b.addEventListener("click", closeKbModal));
+    $("#kb-save").addEventListener("click", saveKbQuestions);
+  }
+
+  function renderImport() {
+    // idempotent: show whichever step the current session is in
+    if (!window.XLSX) {
+      $("#import-summary").textContent = "Spreadsheet engine still loading — give it a second and reopen New RFP.";
+    }
+    showStep(state.imp ? (state.imp.rows ? "review" : "config") : "upload");
+    $("#import-reset").hidden = !state.imp;
+  }
+
+  function showStep(step) {
+    $("#import-step-upload").hidden = step !== "upload";
+    $("#import-step-config").hidden = step !== "config";
+    $("#import-step-review").hidden = step !== "review";
+    $("#import-reset").hidden = step === "upload";
+  }
+
+  function resetImport() {
+    state.imp = null;
+    $("#import-parse-error").hidden = true;
+    showStep("upload");
+    $("#import-reset").hidden = true;
+    $("#import-summary").textContent = "Upload an RFP/RFI spreadsheet — we match each question against the knowledge base and draft the response for you.";
+  }
+
+  async function onImportFile(f) {
+    const errBox = $("#import-parse-error");
+    errBox.hidden = true;
+    if (!window.XLSX) { showImpError("The spreadsheet engine hasn't loaded yet. Check your connection and try again."); return; }
+    if (!/\.(xlsx|xls|xlsm|csv)$/i.test(f.name)) { showImpError("Please choose a .xlsx, .xls or .csv file."); return; }
+    try {
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      if (!wb.SheetNames.length) { showImpError("That file has no sheets we can read."); return; }
+      state.imp = { fileName: f.name, wb, sheetNames: wb.SheetNames };
+      const sel = $("#import-sheet"); sel.innerHTML = "";
+      wb.SheetNames.forEach(n => sel.appendChild(new Option(n, n)));
+      $("#import-file-name").textContent = f.name;
+      impLoadSheet(wb.SheetNames[0]);
+      showStep("config");
+      $("#import-reset").hidden = false;
+    } catch (e) {
+      showImpError("Couldn't read that file: " + (e && e.message ? e.message : e));
+    }
+  }
+  function showImpError(msg) { const b = $("#import-parse-error"); $("span", b).textContent = msg; b.hidden = false; showStep("upload"); }
+
+  function impLoadSheet(name) {
+    const ws = state.imp.wb.Sheets[name];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
+    state.imp.sheetName = name;
+    state.imp.aoa = aoa;
+    // guess a header row: first row within the first 5 that has >=2 non-empty short cells
+    let headerRow = 0;
+    for (let i = 0; i < Math.min(aoa.length, 6); i++) {
+      const cells = (aoa[i] || []).filter(c => String(c).trim());
+      if (cells.length >= 2) { headerRow = i; break; }
+    }
+    state.imp.headerRow = headerRow;
+    const hsel = $("#import-headerrow"); hsel.innerHTML = "";
+    for (let i = 0; i < Math.min(aoa.length, 15); i++) hsel.appendChild(new Option("Row " + (i + 1), i));
+    hsel.value = String(headerRow);
+    impRefreshColumns();
+  }
+
+  function impColumnLabels() {
+    const { aoa, headerRow } = state.imp;
+    const ncols = aoa.reduce((m, r) => Math.max(m, r.length), 0);
+    const header = aoa[headerRow] || [];
+    const labels = [];
+    for (let c = 0; c < ncols; c++) {
+      const h = String(header[c] || "").trim();
+      labels.push({ c, label: h ? `${colLetter(c)} · ${h.slice(0, 40)}` : `Column ${colLetter(c)}`, header: h });
+    }
+    return labels;
+  }
+
+  function impRefreshColumns() {
+    const labels = impColumnLabels();
+    const { aoa, headerRow } = state.imp;
+    // guess question column: header matches keywords, else longest average text
+    const qKey = /quest|require|item|descript|criteria|topic|ask/i;
+    const aKey = /answer|response|reply|comment|supplier|vendor|bidder|remarks?/i;
+    let qCol = labels.findIndex(l => qKey.test(l.header));
+    if (qCol < 0) {
+      let best = -1, bestLen = -1;
+      labels.forEach(l => {
+        let tot = 0, n = 0;
+        for (let i = headerRow + 1; i < aoa.length; i++) { const v = String((aoa[i] || [])[l.c] || ""); if (v) { tot += v.length; n++; } }
+        const avg = n ? tot / n : 0;
+        if (avg > bestLen) { bestLen = avg; best = l.c; }
+      });
+      qCol = best < 0 ? 0 : best;
+    }
+    let aCol = labels.findIndex(l => aKey.test(l.header));
+
+    const qsel = $("#import-qcol"); qsel.innerHTML = "";
+    labels.forEach(l => qsel.appendChild(new Option(l.label, l.c)));
+    qsel.value = String(qCol);
+
+    const asel = $("#import-acol"); asel.innerHTML = "";
+    asel.appendChild(new Option("➕ New column at the end", "-1"));
+    labels.forEach(l => asel.appendChild(new Option(l.label, l.c)));
+    asel.value = String(aCol >= 0 ? aCol : -1);
+
+    state.imp.qCol = qCol;
+    state.imp.aCol = aCol >= 0 ? aCol : -1;
+    qsel.onchange = () => { state.imp.qCol = parseInt(qsel.value, 10); renderImportPreview(); };
+    asel.onchange = () => { state.imp.aCol = parseInt(asel.value, 10); };
+    renderImportPreview();
+  }
+
+  function renderImportPreview() {
+    const { aoa, headerRow, qCol } = state.imp;
+    const tb = $("#import-preview"); tb.innerHTML = "";
+    let shown = 0, total = 0;
+    for (let i = headerRow + 1; i < aoa.length && shown < 4; i++) {
+      const v = String((aoa[i] || [])[qCol] || "").trim();
+      if (!v) continue;
+      shown++;
+      const tr = el("tr");
+      tr.innerHTML = `<td class="text-secondary text-sm" style="width:2.5rem">${i + 1}</td><td class="text-sm">${esc(v.slice(0, 140))}</td>`;
+      tb.appendChild(tr);
+    }
+    for (let i = headerRow + 1; i < aoa.length; i++) { if (String((aoa[i] || [])[qCol] || "").trim()) total++; }
+    $("#import-config-hint").textContent = total
+      ? `${total} question${total === 1 ? "" : "s"} detected in column ${colLetter(qCol)}. Preview below — adjust the column if that's not right.`
+      : "No questions detected in that column — try a different one.";
+  }
+
+  function impRun() {
+    const { aoa, headerRow, qCol, aCol } = state.imp;
+    const index = RFPMatch.buildIndex(state.questions, q => q.question);
+    const byId = {}; state.questions.forEach(q => byId[q.id] = q);
+    const rows = [];
+    for (let i = headerRow + 1; i < aoa.length; i++) {
+      const qtext = String((aoa[i] || [])[qCol] || "").trim();
+      if (!qtext) continue;
+      const cands = RFPMatch.match(qtext, index, 4);
+      const top = cands[0] || null;
+      const band = top ? RFPMatch.band(top.score) : "gap";
+      const chosen = band === "gap" ? null : top.q;
+      rows.push({
+        seq: rows.length + 1,
+        rowIdx: i,
+        question: qtext,
+        sourceAnswer: aCol >= 0 ? String((aoa[i] || [])[aCol] || "").trim() : "",
+        cands,
+        band,
+        chosenId: chosen ? chosen.id : null,
+        answer: chosen ? (chosen.answer || "") : "",
+        overridden: false,
+        include: band !== "gap" && !!(chosen && chosen.answer),
+        addedId: null
+      });
+    }
+    state.imp.rows = rows;
+    state.imp.byId = byId;
+    showStep("review");
+    renderImportStats();
+    renderImportRows();
+  }
+
+  function renderImportStats() {
+    const rows = state.imp.rows;
+    $("#imp-stat-total").textContent = rows.length;
+    $("#imp-stat-strong").textContent = rows.filter(r => r.band === "strong").length;
+    $("#imp-stat-partial").textContent = rows.filter(r => r.band === "partial").length;
+    $("#imp-stat-gap").textContent = rows.filter(r => r.band === "gap").length;
+    const inc = rows.filter(r => r.include && r.answer).length;
+    const gaps = rows.filter(r => r.band === "gap" && !r.addedId).length;
+    $("#import-action-summary").textContent = `${inc} of ${rows.length} answers ready to export`;
+    $("#import-action-sub").textContent = gaps ? `${gaps} gap${gaps === 1 ? "" : "s"} with no knowledge-base answer.` : "Every question has a drafted answer.";
+    const pushBtn = $("#import-pushkb");
+    if (isEditor() && gaps) { pushBtn.hidden = false; pushBtn.innerHTML = `<i class="fa-solid fa-database"></i> Add ${gaps} gap${gaps === 1 ? "" : "s"} to knowledge base`; }
+    else pushBtn.hidden = true;
+  }
+
+  function renderImportRows() {
+    const rows = state.imp.rows;
+    const q = $("#import-search").value.trim().toLowerCase();
+    const bf = $("#import-filter-band").value;
+    const tb = $("#import-rows"); tb.innerHTML = "";
+    let shown = 0;
+    rows.forEach(r => {
+      if (bf === "included") { if (!(r.include && r.answer)) return; }
+      else if (bf && r.band !== bf) return;
+      if (q && !(r.question.toLowerCase().includes(q) || (r.chosenId || "").toLowerCase().includes(q))) return;
+      shown++;
+      const chosen = r.chosenId ? state.imp.byId[r.chosenId] : null;
+      const b = IMP_BAND[r.band];
+
+      // match cell: badge + selector of candidates + gap option
+      const opts = r.cands.map(c => {
+        const cb = IMP_BAND[RFPMatch.band(c.score)];
+        return `<option value="${esc(c.q.id)}" ${c.q.id === r.chosenId ? "selected" : ""}>${esc(c.q.id)} · ${cb.label} (${Math.round(c.score * 100)}%) — ${esc(c.q.question.slice(0, 50))}</option>`;
+      }).join("");
+      const gapSel = `<option value="" ${!r.chosenId ? "selected" : ""}>— No match (gap) —</option>`;
+
+      const tr = el("tr");
+      tr.className = r.addedId ? "rfp-imp-added" : "";
+      tr.innerHTML =
+        `<td class="text-secondary text-sm">${r.seq}</td>` +
+        `<td class="rfp-imp-q"><div>${esc(r.question.slice(0, 220))}</div>${r.sourceAnswer ? `<small class="text-secondary">Their note: ${esc(r.sourceAnswer.slice(0, 90))}</small>` : ""}</td>` +
+        `<td class="rfp-imp-match">` +
+          `<div class="cluster cluster-sm" style="margin-bottom:var(--space-2xs)"><span class="badge ${b.cls} badge-sm">${b.label}</span>` +
+          (chosen ? `<a href="#" class="text-sm rfp-imp-view" data-view="${esc(chosen.id)}">${esc(chosen.id)} <i class="fa-solid fa-arrow-up-right-from-square fa-xs"></i></a>` : (r.addedId ? `<span class="badge badge-brand badge-sm">Added ${esc(r.addedId)}</span>` : "")) +
+          `</div>` +
+          `<select class="select select-sm rfp-imp-sel">${opts}${gapSel}</select>` +
+        `</td>` +
+        `<td class="rfp-imp-ans"><textarea class="textarea rfp-imp-ta" rows="3" placeholder="${r.band === "gap" ? "No match — write an answer or leave for a DRI." : "Answer from the knowledge base…"}">${esc(r.answer)}</textarea>${r.overridden ? `<small class="text-secondary">Edited from KB answer</small>` : ""}</td>` +
+        `<td class="text-center"><label class="check"><input type="checkbox" class="rfp-imp-inc" ${r.include ? "checked" : ""}></label></td>`;
+
+      // wire per-row controls
+      const sel = $(".rfp-imp-sel", tr);
+      sel.addEventListener("change", () => {
+        r.chosenId = sel.value || null;
+        r.band = r.chosenId ? RFPMatch.band((r.cands.find(c => c.q.id === r.chosenId) || {}).score || 0) : "gap";
+        if (!r.overridden) { const kb = r.chosenId ? state.imp.byId[r.chosenId] : null; r.answer = kb ? (kb.answer || "") : ""; }
+        r.include = !!(r.chosenId && r.answer) ? true : r.include;
+        renderImportStats(); renderImportRows();
+      });
+      const ta = $(".rfp-imp-ta", tr);
+      ta.addEventListener("input", () => { r.answer = ta.value; r.overridden = true; });
+      ta.addEventListener("blur", renderImportStats);
+      const inc = $(".rfp-imp-inc", tr);
+      inc.addEventListener("change", () => { r.include = inc.checked; renderImportStats(); });
+      const view = $(".rfp-imp-view", tr);
+      if (view) view.addEventListener("click", e => { e.preventDefault(); const row = state.questions.find(x => x.id === view.dataset.view); if (row) openDrawer(row); });
+
+      tb.appendChild(tr);
+    });
+    $("#import-summary").textContent = `${state.imp.fileName} — ${shown} shown of ${rows.length} questions.`;
+  }
+
+  function impDownload() {
+    const { wb, sheetName, aoa, headerRow, rows } = state.imp;
+    let writeCol = state.imp.aCol;
+    const ws = wb.Sheets[sheetName];
+    const ncols = aoa.reduce((m, r) => Math.max(m, r.length), 0);
+    if (writeCol < 0) {
+      writeCol = ncols;
+      XLSX.utils.sheet_add_aoa(ws, [["Cloudstaff Response"]], { origin: { r: headerRow, c: writeCol } });
+    }
+    let written = 0;
+    rows.forEach(r => {
+      if (r.include && r.answer) { XLSX.utils.sheet_add_aoa(ws, [[r.answer]], { origin: { r: r.rowIdx, c: writeCol } }); written++; }
+    });
+    // make sure the sheet range covers the new column
+    const ref = XLSX.utils.decode_range(ws["!ref"]);
+    if (writeCol > ref.e.c) { ref.e.c = writeCol; ws["!ref"] = XLSX.utils.encode_range(ref); }
+    const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+    const base = state.imp.fileName.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
+    downloadBlob(new Blob([out], { type: "application/octet-stream" }), `${base} — Cloudstaff responses.xlsx`);
+    toast(`Filled ${written} answer${written === 1 ? "" : "s"} into ${colLetter(writeCol)}`);
+  }
+
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = el("a"); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  // ---- write new (gap) questions back into the knowledge base -------------
+  function openKbModal() {
+    if (!isEditor()) return;
+    const gaps = state.imp.rows.filter(r => r.band === "gap" && !r.addedId);
+    if (!gaps.length) return;
+    const cats = isAdmin() ? state.categories : state.categories.filter(c => state.myCategoryIds.has(c.id));
+    const body = $("#kb-body");
+    if (!cats.length) {
+      body.innerHTML = `<div class="alert alert-warning"><i class="alert-icon fa-solid fa-user-shield"></i><span>You're not a DRI for any category, so you can't add questions. Ask an admin to assign you, or add them from an admin account.</span></div>`;
+      $("#kb-save").disabled = true;
+      openOverlay("#kb-overlay"); return;
+    }
+    $("#kb-save").disabled = false;
+    const catOpts = cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+    body.innerHTML =
+      `<p class="text-secondary text-sm">Assign a category and confirm the wording for each new question. New questions are saved for DRI review (they won't overwrite anything). ${isAdmin() ? "" : "You can only file into categories you own."}</p>` +
+      gaps.map((r, i) => `
+        <div class="rfp-kb-item card" data-kb-row="${r.seq}">
+          <label class="check" style="margin-bottom:var(--space-xs)"><input type="checkbox" class="kb-inc" checked> <strong>Q${r.seq}</strong></label>
+          <div class="field"><label class="field-label">Question</label><textarea class="textarea kb-q" rows="2">${esc(r.question)}</textarea></div>
+          <div class="cluster cluster-sm">
+            <div class="field flex-1"><label class="field-label">Category</label><select class="select kb-cat">${catOpts}</select></div>
+            <div class="field"><label class="field-label">Tier</label><select class="select kb-tier"><option>Client</option><option>Internal</option></select></div>
+          </div>
+          <div class="field"><label class="field-label">Answer (optional)</label><textarea class="textarea kb-a" rows="2" placeholder="Leave blank to write later.">${esc(r.answer)}</textarea></div>
+        </div>`).join("");
+    $("#kb-error").hidden = true;
+    openOverlay("#kb-overlay");
+  }
+  function openOverlay(sel) { $(sel).hidden = false; document.body.style.overflow = "hidden"; }
+  function closeKbModal() { $("#kb-overlay").hidden = true; document.body.style.overflow = ""; }
+
+  async function saveKbQuestions() {
+    const err = $("#kb-error"); err.hidden = true;
+    const items = $$("#kb-body [data-kb-row]").filter(n => $(".kb-inc", n).checked);
+    if (!items.length) { err.textContent = "Nothing selected."; err.hidden = false; return; }
+    const btn = $("#kb-save"); btn.classList.add("is-loading"); btn.disabled = true;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const src = `Imported from ${state.imp.fileName} · ${stamp}`;
+    let ok = 0, fail = 0;
+    for (const node of items) {
+      const seq = parseInt(node.dataset.kbRow, 10);
+      const row = state.imp.rows.find(r => r.seq === seq);
+      const catId = parseInt($(".kb-cat", node).value, 10);
+      const question = $(".kb-q", node).value.trim();
+      const tier = $(".kb-tier", node).value;
+      const answer = $(".kb-a", node).value.trim() || null;
+      if (!question || !catId) { fail++; continue; }
+      const status = answer ? "edit-pending" : "approved-blank";
+      const id = nextIdForCategory(catId);
+      const q1 = await state.sb.from("canonical_questions").insert({ id, category_id: catId, question, tier, status, needs_rework: !!answer, sample_only: false });
+      if (q1.error) { fail++; continue; }
+      await state.sb.from("canonical_answers").insert({ question_id: id, answer, answer_source: src, updated_by: state.user.id });
+      await state.sb.from("answer_versions").insert({ question_id: id, answer, answer_source: src, note: `Imported from ${state.imp.fileName} (row ${row ? row.rowIdx + 1 : "?"}) by ${state.profile.email}`, created_by: state.user.id });
+      if (row) { row.addedId = id; row.band = "partial"; row.chosenId = id; }
+      // keep local list roughly current so nextIdForCategory increments
+      state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status, question, answer, needs_rework: !!answer });
+      ok++;
+    }
+    btn.classList.remove("is-loading"); btn.disabled = false;
+    closeKbModal();
+    await loadQuestions();
+    toast(ok ? `Added ${ok} question${ok === 1 ? "" : "s"} to the knowledge base${fail ? ` (${fail} skipped)` : ""}` : "Nothing added", ok ? "success" : "danger");
+    renderImportStats(); renderImportRows();
+  }
 })();
