@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.4.1";
+  const APP_VERSION = "v0.4.2";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -135,14 +135,28 @@
     $("#user-name").textContent = name;
     $("#user-role").textContent = (state.profile.role || "viewer").replace(/^\w/, c => c.toUpperCase());
     $("#user-avatar").textContent = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
-    const owned = ownedQuestions().length;
+    const todo = ownedQuestions().filter(q => todoFor(q).rank < 3).length;
     const nav = $("#attest-nav-count");
-    if (owned) { nav.textContent = owned; nav.hidden = false; } else nav.hidden = true;
+    if (todo) { nav.textContent = todo; nav.hidden = false; } else nav.hidden = true;
     $("#new-q-btn").hidden = !isEditor();
   }
 
+  // What does this owned question still need? (lower rank = more urgent)
+  function confirmedThisMonth(q) {
+    const a = state.latestAttest[q.id];
+    return !!(a && a.outcome === "confirmed" && a.attested_at.slice(0, 7) === new Date().toISOString().slice(0, 7));
+  }
+  function todoFor(q) {
+    if (q.status === "approved-blank" || !q.answer) return { rank: 0, cls: "badge-warning", label: "Write answer" };
+    if (q.needs_rework)                              return { rank: 1, cls: "badge-info",    label: "Rework" };
+    if (!confirmedThisMonth(q))                      return { rank: 2, cls: "badge-neutral", label: "Confirm" };
+    return { rank: 3, cls: "badge-success", label: "Up to date" };
+  }
+
   function route() {
-    const view = (location.hash || "#/browser").includes("attest") ? "attest" : "browser";
+    let hash = location.hash;
+    if (!hash) hash = ownedQuestions().length ? "#/attest" : "#/browser";  // DRIs land on To Do
+    const view = hash.includes("attest") ? "attest" : "browser";
     $("#browser-view").hidden = view !== "browser";
     $("#attest-view").hidden = view !== "attest";
     $$("[data-nav]").forEach(a => a.classList.toggle("is-active", a.dataset.nav === view));
@@ -423,24 +437,42 @@
     const owned = ownedQuestions();
     $("#attest-not-dri").hidden = owned.length > 0;
     $("#attest-table-wrap").hidden = owned.length === 0;
-    const monthKey = new Date().toISOString().slice(0, 7);
-    const confirmedThisMonth = q => { const a = state.latestAttest[q.id]; return a && a.outcome === "confirmed" && a.attested_at.slice(0, 7) === monthKey; };
     $("#stat-owned").textContent = owned.length;
     $("#stat-attested").textContent = owned.filter(confirmedThisMonth).length;
     $("#stat-blank").textContent = owned.filter(q => q.status === "approved-blank" || !q.answer).length;
     $("#stat-due").textContent = owned.filter(q => !confirmedThisMonth(q)).length;
-    $("#attest-summary").textContent = owned.length ? `You own ${owned.length} questions across ${new Set(owned.map(q => q.category)).size} categories.` : "";
+    const todoCount = owned.filter(q => todoFor(q).rank < 3).length;
+    $("#attest-summary").textContent = owned.length
+      ? (todoCount ? `${todoCount} item${todoCount === 1 ? "" : "s"} need your attention across ${new Set(owned.map(q => q.category)).size} categories.`
+                   : `All ${owned.length} of your questions are up to date. Nice.`)
+      : "";
+
+    // most urgent first, then by ID
+    const rows = owned.slice().sort((a, b) => todoFor(a).rank - todoFor(b).rank || a.id.localeCompare(b.id, undefined, { numeric: true }));
     const tbody = $("#attest-rows"); tbody.innerHTML = "";
-    owned.forEach(q => {
-      const last = state.latestAttest[q.id]; const done = confirmedThisMonth(q);
+    rows.forEach(q => {
+      const last = state.latestAttest[q.id]; const td = todoFor(q); const done = confirmedThisMonth(q);
       const tr = el("tr");
-      tr.innerHTML = `<td><code>${esc(q.id)}</code></td><td class="rfp-qa-q">${esc(q.question)}</td><td>${statusBadge(q.status)}</td><td class="text-sm">${last ? fmtDate(last.attested_at) : '<span class="text-secondary">—</span>'}</td><td class="text-right"></td>`;
+      tr.innerHTML =
+        `<td><code>${esc(q.id)}</code></td>` +
+        `<td class="rfp-qa-q">${esc(q.question)}</td>` +
+        `<td><span class="badge ${td.cls} badge-sm">${td.label}</span></td>` +
+        `<td class="text-sm">${last ? fmtDate(last.attested_at) : '<span class="text-secondary">—</span>'}</td>` +
+        `<td class="text-right"></td>`;
       const actions = el("div", "cluster cluster-sm", ""); actions.style.justifyContent = "flex-end";
-      const view = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-eye"></i>');
-      view.addEventListener("click", () => openDrawer(q));
-      const conf = el("button", `button button-sm ${done ? "button-secondary" : "button-success"}`, done ? '<i class="fa-solid fa-check"></i> Confirmed' : '<i class="fa-solid fa-check"></i> Confirm');
-      conf.disabled = done; conf.addEventListener("click", () => attest(q, "confirmed"));
-      actions.append(view, conf); tr.lastChild.appendChild(actions); tbody.appendChild(tr);
+      // primary action depends on what's needed
+      if (td.rank <= 1) {
+        const openBtn = el("button", "button button-primary button-sm", `<i class="fa-solid fa-pen"></i> ${td.rank === 0 ? "Write" : "Rework"}`);
+        openBtn.addEventListener("click", () => openDrawer(q));
+        actions.append(openBtn);
+      } else {
+        const view = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-eye"></i>');
+        view.addEventListener("click", () => openDrawer(q));
+        const conf = el("button", `button button-sm ${done ? "button-secondary" : "button-success"}`, done ? '<i class="fa-solid fa-check"></i> Confirmed' : '<i class="fa-solid fa-check"></i> Confirm');
+        conf.disabled = done; conf.addEventListener("click", () => attest(q, "confirmed"));
+        actions.append(view, conf);
+      }
+      tr.lastChild.appendChild(actions); tbody.appendChild(tr);
     });
   }
 
