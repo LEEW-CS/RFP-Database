@@ -1,59 +1,76 @@
-# Cloudstaff RFP Builder — Phase 2 (web interface, slice 1)
+# Cloudstaff RFP Builder
 
-A plain HTML/CSS/JS front-end on the **Cloudstaff Design System v2.38** talking to the Phase 1 Supabase database. No build step, no framework. This first slice ships two screens:
+Cloudstaff's single source of truth for answering RFPs / RFIs — a Supabase-backed
+web app, live at **https://leew-cs.github.io/RFP-Database/**.
 
-- **Q&A Browser** — all 143 canonical questions, searchable and filterable by category, status and tier, with a detail drawer showing the canonical answer, most-recent source, DRI note, suggested attachments, and the full provenance trail.
-- **My Attestations** — the questions in the categories you own as a DRI, with KPI tiles (owned / confirmed this month / needs an answer / awaiting confirmation) and one-click **Confirm accurate** / **Flag change needed**, written to the `attestations` table (audited).
+Plain HTML/CSS/JS on the **Cloudstaff Design System v2.38**. No build step, no
+framework. Current version: see `APP_VERSION` in `js/app.js` (shown on the login
+page and sidebar).
 
-Plus: dark/light theme toggle, collapsible sidebar, Cloudstaff branding.
+## What it does
 
-## 1. Configure (30 seconds)
+- **Knowledge base** — every RFP question has one consolidated, approved answer
+  with full provenance (which client RFPs the answer came from and where it has
+  been used since), version history, and attachable Library assets.
+- **DRI ownership** — every category, question and Library asset has a Directly
+  Responsible Individual. Only Editors/Admins can own things; Viewers are
+  read-only and can't be assigned anything.
+- **RFP response workflow** — upload a client RFP spreadsheet; questions are
+  auto-matched against the knowledge base (TF-IDF). Strong untouched matches
+  auto-approve; everything else is assigned to a DRI who writes/approves the
+  answer. When nothing is pending, **Finalise and write Response** produces the
+  filled document, stores it, and records provenance for every answer used.
+- **Accountability** — the **Team Board** shows everyone, per active RFP, who is
+  holding which answers, plus each person's outstanding knowledge-base upkeep
+  (write / rework / monthly confirm). Public to all signed-in users by design.
 
-Open `js/config.js` and paste two values from Supabase → **Settings → API**:
+## The screens
 
-```js
-window.RFP_CONFIG = {
-  SUPABASE_URL:      "https://YOUR-PROJECT-REF.supabase.co",
-  SUPABASE_ANON_KEY: "YOUR-ANON-OR-PUBLISHABLE-KEY"
-};
-```
+| Screen | Who | What |
+|---|---|---|
+| **My To Do** | DRIs | Answers to write/rework/confirm + RFP answers assigned to you |
+| **Q&A Browser** | all | Search/filter the knowledge base; drawer with answer, history, provenance, attached assets; in-app editing for DRIs |
+| **New RFP** | all | Upload a spreadsheet → auto-match → create a response project with DRI assignments |
+| **RFP Responses** | all | Track each response project; review/approve rows; finalise the document |
+| **RFP History** | all | Every RFP on record (historical sources + finalised responses); view its Q&A or download a Cloudstaff-formatted Excel |
+| **Library** | all view; editors manage | Eight sections of supporting assets (videos are link-only). Assets have DRIs and stable IDs — edit/replace in place so question bindings never break; deleting is admin-only with a transfer tool |
+| **Team Board** | all | Who is holding what, per RFP and per person |
+| **Users & DRIs** | admin | Full user CRUD (create logins, edit, delete with ownership transfer), roles, category DRI mapping |
 
-Both are safe in a browser — Row-Level Security protects the data and users must sign in. **Do not** put the `service_role` key here.
+## Setup
 
-## 2. Run it
-
-Serve the folder over HTTP (auth is happier over http/https than `file://`):
-
-```bash
-cd phase2
-python3 -m http.server 8080
-# open http://localhost:8080
-```
-
-Sign in with a user you created in Supabase Auth — e.g. `driuser1@cloudstaff.com` with the password you set when adding them. Because the read policies are `to authenticated`, you must be signed in to see anything (this is intended for an internal tool).
-
-## 3. Deploy
-
-It's static files — host anywhere: Netlify, Vercel, Cloudflare Pages, GitHub Pages, or an internal Cloudstaff static host. (GitHub deployment is a later Phase 2 to-do; for now local or any static host works.) Set the two config values for the target environment before publishing.
-
-## What each screen does
-
-**Q&A Browser** loads `v_canonical` (question + category + current answer), tallies provenance counts, and renders a clickable table. The search box matches ID, question and answer text; the three dropdowns filter by category / status / tier. Clicking a row opens the drawer, which lazy-loads that question's provenance rows and shows any reference resources whose `supports` field names the question (e.g. the Modern Slavery Statement appears under ES-01/ES-05).
-
-**My Attestations** reads `category_dris` for the signed-in user to find their categories, lists the questions in them, and shows when each was last confirmed. "Confirm accurate" inserts a `confirmed` attestation; "Flag change needed" prompts for a note and inserts a `changed` attestation. The RLS policy only lets a DRI attest questions in their own categories, so the buttons only appear where you're the owner.
+1. **Database** — run the SQL in `phase1/` of the project workspace against a
+   Supabase project, in order: the numbered schema/seed steps, then extensions
+   **10–17** (audit-trigger fix, category_dris read policy, RFP workflow +
+   storage, user auto-provision trigger, library + sections, asset governance,
+   admin user RPCs). Each file states its expected check result.
+2. **Config** — `js/config.js` holds the Supabase URL and anon/publishable key.
+   Both are safe in a browser (RLS + auth protect the data). **Never** put the
+   `service_role` key in any client file.
+3. **Serve** — static files; GitHub Pages serves this repo from `main` / root.
+   Any static host works. Sign-in is required to see anything.
 
 ## Files
 
 ```
-index.html        app shell, login, both views, detail drawer
-css/app.css        app-layer overrides (all via design-system tokens)
-js/config.js       <-- you edit this (URL + anon key)
-js/app.js          all logic: auth, data load, browser, drawer, attestation
+index.html    app shell, login, all views, drawer + modals, inline logo sprite
+css/app.css   app-layer overrides on top of the design system
+js/config.js  Supabase URL + anon key
+js/match.js   dependency-free TF-IDF question matcher (Node-testable)
+js/app.js     all application logic (APP_VERSION lives here)
 ```
 
-## Notes & limits (this slice)
+CDN scripts (order matters): supabase-js@2 → SheetJS 0.18.5 (spreadsheet
+parse/fill) → ExcelJS 4.4.0 (styled History exports) → config → match.js →
+app.js.
 
-- Editing answers in-app (DRI CRUD → new answer version) is the **next** slice — this one is browse + attest.
-- Not yet built (later Phase 2): new-RFP upload/match/write-back, per-client history, win-improvement dashboard, region/currency response builder.
-- The design system is loaded from `https://style.cloudstaff.com/v2.38.0/css/ui.min.css`. If Cloudstaff pins a specific version, change that one URL in `index.html`.
-- Theme, session and last-used view persist in `localStorage`.
+## Roles
+
+- **Viewer** — read-only. Cannot own categories, questions or assets.
+- **Editor** — a DRI: full CRUD within their assigned categories, Library
+  management, RFP answer approval for rows assigned to them.
+- **Admin** — everything, including user management and asset deletion.
+
+Logins are created from **Users & DRIs** (admin) with a generated temporary
+password. Deleting a user requires transferring everything they own first —
+the delete dialog does it in one click.

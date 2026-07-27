@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.11.0";
+  const APP_VERSION = "v0.11.1";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
