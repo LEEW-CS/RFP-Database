@@ -198,3 +198,6 @@
   .rfp-qa-asset { padding: var(--space-2xs) 0; }
   #board-list > h3 { margin-top: var(--space-md); }
 }
+
+/* v0.10.0 — asset governance */
+@layer app { .rfp-lib-nodri { color: var(--color-danger, #c62828); } }

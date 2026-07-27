@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.9.0";
+  const APP_VERSION = "v0.10.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -66,7 +66,9 @@
     rfpTodos: [],       // pending rfp_rows assigned to me
     approveRow: null,   // row open in the approve modal
     currentHistory: null, currentHistoryRows: [],   // RFP History detail
-    resSection: null    // section being added to in the Library modal
+    resSection: null,   // section being added to in the Library modal
+    resEditing: null,   // resource open in the edit modal (null = adding new)
+    resDeleting: null, resDeleteBound: []   // admin delete-asset modal
   };
 
   const isAdmin = () => (state.profile && state.profile.role === "admin");
@@ -690,6 +692,9 @@
     $("#history-export").addEventListener("click", exportHistoryExcel);
     $$("[data-res-close]").forEach(b => b.addEventListener("click", closeResModal));
     $("#res-save").addEventListener("click", saveResource);
+    $$("[data-resdel-close]").forEach(b => b.addEventListener("click", closeResDeleteModal));
+    $("#resdel-transfer").addEventListener("click", transferAssetBindings);
+    $("#resdel-confirm").addEventListener("click", confirmAssetDelete);
     $("#rfp-finalise").addEventListener("click", finaliseRfp);
     $("#rfp-download-final").addEventListener("click", downloadFinal);
   }
@@ -1583,8 +1588,9 @@
     card.innerHTML =
       (isImage ? `<div class="rfp-lib-thumb" data-thumb><span class="spinner spinner--sm"></span></div>`
                : `<div class="rfp-lib-icon"><i class="fa-solid ${LIB_ICON[sec] || "fa-paperclip"}"></i></div>`) +
-      `<strong class="text-sm">${esc(r.name)}</strong>` +
+      `<strong class="text-sm">${esc(r.name)} <code class="text-xs text-secondary">${esc(r.id)}</code></strong>` +
       (r.summary ? `<span class="text-secondary text-xs">${esc(r.summary.slice(0, 100))}</span>` : "") +
+      `<span class="text-xs ${r.dri_user_id ? "text-secondary" : "rfp-lib-nodri"}"><i class="fa-solid fa-user-shield"></i> ${r.dri_user_id ? "DRI: " + esc(nameOf(r.dri_user_id)) : "No DRI assigned"}</span>` +
       `<div class="cluster cluster-sm rfp-lib-actions"></div>`;
     const actions = $(".rfp-lib-actions", card);
     if (r.url) {
@@ -1603,16 +1609,15 @@
       actions.appendChild(dl);
     }
     if (isEditor()) {
+      const edit = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-pen"></i>');
+      edit.title = "Edit / replace — the asset keeps its ID, bound questions stay linked";
+      edit.addEventListener("click", () => openResModal(r.section || sec, r));
+      actions.appendChild(edit);
+    }
+    if (isAdmin()) {
       const del = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-trash"></i>');
-      del.title = "Remove from library";
-      del.addEventListener("click", async () => {
-        if (!confirm(`Remove "${r.name}" from the library?`)) return;
-        if (r.file_ref) await state.sb.storage.from("library").remove([r.file_ref]);
-        const { error } = await state.sb.from("resources").delete().eq("id", r.id);
-        if (error) return toast(error.message, "danger");
-        toast(`${r.name} removed`);
-        renderLibrary();
-      });
+      del.title = "Delete asset (admin only)";
+      del.addEventListener("click", () => openResDeleteModal(r));
       actions.appendChild(del);
     }
     if (isImage) {
@@ -1624,58 +1629,138 @@
     return card;
   }
 
-  function nextResId() {
+    function nextResId() {
     let max = 0;
     state.resources.forEach(r => { const m = /^RES-(\d+)$/.exec(r.id); if (m) max = Math.max(max, parseInt(m[1], 10)); });
     return `RES-${String(max + 1).padStart(2, "0")}`;
   }
 
-  function openResModal(section) {
+  function openResModal(section, resource) {
     if (!isEditor()) return;
     state.resSection = section;
+    state.resEditing = resource || null;
+    $("#res-modal-title").textContent = resource ? `Edit asset ${resource.id} — bindings keep pointing here` : "Add to the Library";
+    $("#res-save").innerHTML = resource ? '<i class="fa-solid fa-floppy-disk"></i> Save changes' : '<i class="fa-solid fa-plus"></i> Add item';
     const sel = $("#res-section"); sel.innerHTML = "";
     LIB_SECTIONS.forEach(s => sel.appendChild(new Option(s, s)));
-    sel.value = section;
+    sel.value = resource ? (resource.section || section) : section;
+    const dri = $("#res-dri"); dri.innerHTML = "";
+    editorProfiles().forEach(p => dri.appendChild(new Option(p.full_name || p.email, p.user_id)));
+    dri.value = resource && resource.dri_user_id ? resource.dri_user_id : state.user.id;
+    if (!dri.value) dri.selectedIndex = 0;
     const syncVideoOnly = () => {
       const videoOnly = LIB_VIDEO_SECTIONS.includes(sel.value);
-      $("#res-file").closest(".field").hidden = videoOnly;
+      $("#res-file-field").hidden = videoOnly;
       if (videoOnly) $("#res-file").value = "";
+      $("#res-file-hint").textContent = resource
+        ? "Upload only to REPLACE the current file — the asset keeps its ID, so questions bound to it stay linked."
+        : "Stored privately; the app serves it with short-lived links. Provide a link OR a file, not both.";
     };
     sel.onchange = syncVideoOnly; syncVideoOnly();
-    $("#res-name").value = ""; $("#res-summary").value = ""; $("#res-url").value = ""; $("#res-file").value = "";
+    $("#res-name").value = resource ? resource.name : "";
+    $("#res-summary").value = resource ? (resource.summary || "") : "";
+    $("#res-url").value = resource ? (resource.url || "") : "";
+    $("#res-file").value = "";
     $("#res-error").hidden = true;
     openOverlay("#res-overlay");
   }
-  function closeResModal() { $("#res-overlay").hidden = true; document.body.style.overflow = ""; }
+  function closeResModal() { $("#res-overlay").hidden = true; document.body.style.overflow = ""; state.resEditing = null; }
 
   async function saveResource() {
     const err = $("#res-error"); err.hidden = true;
+    const editing = state.resEditing;
     const section = $("#res-section").value;
     const name = $("#res-name").value.trim();
     const summary = $("#res-summary").value.trim() || null;
     const url = $("#res-url").value.trim() || null;
     const file = $("#res-file").files[0] || null;
+    const driUid = $("#res-dri").value || null;
     if (!name) { err.textContent = "Give it a name."; err.hidden = false; return; }
+    if (!driUid) { err.textContent = "Every asset needs a DRI."; err.hidden = false; return; }
     if (LIB_VIDEO_SECTIONS.includes(section)) {
       if (file) { err.textContent = "Videos are link-only — paste a YouTube/Vimeo/public URL instead of uploading."; err.hidden = false; return; }
       if (!url) { err.textContent = "Paste the video URL."; err.hidden = false; return; }
     }
-    if (!url && !file) { err.textContent = "Provide a link or upload a file."; err.hidden = false; return; }
-    if (url && file) { err.textContent = "Link or file — not both."; err.hidden = false; return; }
-    const btn = $("#res-save"); btn.classList.add("is-loading"); btn.disabled = true;
-    let fileRef = null;
-    if (file) {
-      fileRef = `${section.toLowerCase().replace(/\s+/g, "-")}/${Date.now()}_${file.name.replace(/[^\w.\- ]+/g, "_")}`;
-      const up = await state.sb.storage.from("library").upload(fileRef, file, { upsert: true });
-      if (up.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = up.error.message; err.hidden = false; return; }
+    if (!editing) {
+      if (!url && !file) { err.textContent = "Provide a link or upload a file."; err.hidden = false; return; }
+      if (url && file) { err.textContent = "Link or file — not both."; err.hidden = false; return; }
+    } else if (!url && !file && !editing.file_ref) {
+      err.textContent = "The asset needs a link or a file."; err.hidden = false; return;
     }
-    const { error } = await state.sb.from("resources").insert({
-      id: nextResId(), name, type: section, summary, section, url, file_ref: fileRef, supports: null
-    });
+    const btn = $("#res-save"); btn.classList.add("is-loading"); btn.disabled = true;
+
+    let fileRef = editing ? editing.file_ref : null;
+    if (file) {
+      const newRef = `${section.toLowerCase().replace(/\s+/g, "-")}/${Date.now()}_${file.name.replace(/[^\w.\- ]+/g, "_")}`;
+      const up = await state.sb.storage.from("library").upload(newRef, file, { upsert: true });
+      if (up.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = up.error.message; err.hidden = false; return; }
+      fileRef = newRef;
+    }
+    const patch = { name, type: section, summary, section, url, file_ref: fileRef, dri_user_id: driUid };
+    let error;
+    if (editing) {
+      ({ error } = await state.sb.from("resources").update(patch).eq("id", editing.id));
+      if (!error && file && editing.file_ref && editing.file_ref !== fileRef) {
+        await state.sb.storage.from("library").remove([editing.file_ref]);   // old copy gone, ID unchanged
+      }
+    } else {
+      ({ error } = await state.sb.from("resources").insert({ id: nextResId(), supports: null, ...patch }));
+    }
     btn.classList.remove("is-loading"); btn.disabled = false;
     if (error) { err.textContent = error.message; err.hidden = false; return; }
     closeResModal();
-    toast(`Added to ${section}`);
+    toast(editing ? `${editing.id} updated — bound questions untouched` : `Added to ${section}`);
+    renderLibrary();
+  }
+
+  // ---- admin-only delete, with bound-question review + transfer -----------
+  async function openResDeleteModal(r) {
+    if (!isAdmin()) return;
+    state.resDeleting = r;
+    $("#resdel-name").textContent = `${r.name} (${r.id}) — ${r.section || "unfiled"}`;
+    $("#resdel-error").hidden = true;
+    const { data } = await state.sb.from("question_resources").select("question_id").eq("resource_id", r.id);
+    state.resDeleteBound = data || [];
+    const bound = state.resDeleteBound;
+    $("#resdel-bound-wrap").hidden = !bound.length;
+    $("#resdel-none").hidden = bound.length > 0;
+    if (bound.length) {
+      $("#resdel-bound-count").textContent = `${bound.length} question${bound.length === 1 ? " is" : "s are"} bound to this asset.`;
+      $("#resdel-bound-list").innerHTML = bound.map(b => {
+        const q = state.questions.find(x => x.id === b.question_id);
+        return `<div class="rfp-board-item"><code class="text-xs">${esc(b.question_id)}</code><span class="text-sm rfp-board-q">${esc(q ? q.question.slice(0, 120) : "")}</span></div>`;
+      }).join("");
+      const tsel = $("#resdel-transfer-target"); tsel.innerHTML = "";
+      tsel.appendChild(new Option("— Transfer bindings to… —", ""));
+      state.resources.filter(x => x.id !== r.id).forEach(x =>
+        tsel.appendChild(new Option(`${x.id} · ${x.name} (${x.section || "unfiled"})`, x.id)));
+    }
+    openOverlay("#resdel-overlay");
+  }
+  function closeResDeleteModal() { $("#resdel-overlay").hidden = true; document.body.style.overflow = ""; state.resDeleting = null; }
+
+  async function transferAssetBindings() {
+    const r = state.resDeleting; if (!r) return;
+    const target = $("#resdel-transfer-target").value;
+    const err = $("#resdel-error"); err.hidden = true;
+    if (!target) { err.textContent = "Pick the asset to transfer the bound Q&A to."; err.hidden = false; return; }
+    const rows = state.resDeleteBound.map(b => ({ question_id: b.question_id, resource_id: target }));
+    const ins = await state.sb.from("question_resources").upsert(rows, { onConflict: "question_id,resource_id", ignoreDuplicates: true });
+    if (ins.error) { err.textContent = ins.error.message; err.hidden = false; return; }
+    const del = await state.sb.from("question_resources").delete().eq("resource_id", r.id);
+    if (del.error) { err.textContent = del.error.message; err.hidden = false; return; }
+    toast(`${rows.length} binding${rows.length === 1 ? "" : "s"} moved to ${target}`);
+    openResDeleteModal(r);   // refresh: should now show none bound
+  }
+
+  async function confirmAssetDelete() {
+    const r = state.resDeleting; if (!r) return;
+    const err = $("#resdel-error"); err.hidden = true;
+    if (r.file_ref) await state.sb.storage.from("library").remove([r.file_ref]);
+    const { error } = await state.sb.from("resources").delete().eq("id", r.id);
+    if (error) { err.textContent = error.message; err.hidden = false; return; }
+    closeResDeleteModal();
+    toast(`${r.id} deleted`);
     renderLibrary();
   }
 

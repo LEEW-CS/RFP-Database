@@ -718,7 +718,7 @@
     <div class="rfp-overlay-backdrop" data-res-close></div>
     <div class="modal modal-md rfp-modal" role="dialog" aria-label="Add library item">
       <header class="modal-header">
-        <h3>Add to the Library</h3>
+        <h3 id="res-modal-title">Add to the Library</h3>
         <button class="modal-close" data-res-close aria-label="Close">×</button>
       </header>
       <div class="modal-body stack-md">
@@ -726,6 +726,10 @@
           <div class="field flex-1">
             <label class="field-label" for="res-section">Section</label>
             <select class="select" id="res-section"></select>
+          </div>
+          <div class="field flex-1">
+            <label class="field-label" for="res-dri">DRI (owns keeping it current)</label>
+            <select class="select" id="res-dri"></select>
           </div>
         </div>
         <div class="field">
@@ -740,16 +744,52 @@
           <label class="field-label" for="res-url">Link URL (for videos or externally hosted items)</label>
           <input class="input" id="res-url" placeholder="https://…">
         </div>
-        <div class="field">
+        <div class="field" id="res-file-field">
           <label class="field-label" for="res-file">Or upload a file</label>
           <input class="input" type="file" id="res-file">
-          <p class="field-hint text-secondary text-sm">Stored privately; the app serves it with short-lived links. Provide a link OR a file, not both.</p>
+          <p class="field-hint text-secondary text-sm" id="res-file-hint">Stored privately; the app serves it with short-lived links. Provide a link OR a file, not both.</p>
         </div>
         <div id="res-error" class="field-error" hidden></div>
       </div>
       <footer class="modal-footer">
         <button class="button button-tertiary" data-res-close>Cancel</button>
         <button class="button button-primary" id="res-save"><i class="fa-solid fa-plus"></i> Add item</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ===================== DELETE ASSET MODAL (admin) ===================== -->
+  <div class="rfp-overlay" id="resdel-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-resdel-close></div>
+    <div class="modal modal-md rfp-modal" role="dialog" aria-label="Delete asset">
+      <header class="modal-header">
+        <h3>Delete asset</h3>
+        <button class="modal-close" data-resdel-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md">
+        <p><strong id="resdel-name">—</strong></p>
+        <div id="resdel-bound-wrap" class="stack-sm">
+          <div class="alert alert-warning">
+            <i class="alert-icon fa-solid fa-link"></i>
+            <div>
+              <strong id="resdel-bound-count">—</strong>
+              <span>Deleting will remove these bindings. Better: add the replacement asset first, then transfer the bound Q&amp;A to it below — or use <em>Edit</em> on the asset to update its file/link in place (the asset keeps its ID, so nothing is orphaned).</span>
+            </div>
+          </div>
+          <div id="resdel-bound-list" class="rfp-board-items"></div>
+          <div class="cluster cluster-sm">
+            <select class="select select-sm flex-1" id="resdel-transfer-target"></select>
+            <button class="button button-secondary button-sm" id="resdel-transfer"><i class="fa-solid fa-right-left"></i> Transfer bound Q&amp;A</button>
+          </div>
+        </div>
+        <div id="resdel-none" class="alert alert-success banner-inline" hidden>
+          <i class="alert-icon fa-solid fa-circle-check"></i><span>No questions are bound to this asset — safe to delete.</span>
+        </div>
+        <div id="resdel-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-resdel-close>Cancel</button>
+        <button class="button button-danger" id="resdel-confirm"><i class="fa-solid fa-trash"></i> Delete asset</button>
       </footer>
     </div>
   </div>
