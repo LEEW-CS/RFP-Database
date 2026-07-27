@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.11.5";
+  const APP_VERSION = "v0.12.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -1881,8 +1881,12 @@
     $("#user-email").value = profile ? (profile.email || "") : "";
     $("#user-email").disabled = !!profile;
     $("#user-fullname").value = profile ? (profile.full_name || "") : "";
-    $("#user-pw-field").hidden = !!profile;
-    if (!profile) $("#user-pw").value = tempPassword();
+    $("#user-pw-field").hidden = false;
+    $("#user-pw-label").textContent = profile ? "Set a new password (optional)" : "Temporary password";
+    $("#user-pw-hint").textContent = profile
+      ? "Leave blank to keep the current password. Type one (min 8 characters) to reset it — then give it to the user."
+      : "Editable — type your own or keep the generated one. Give it to the user; they should change it after first login.";
+    $("#user-pw").value = profile ? "" : tempPassword();
     $("#user-newrole").value = profile ? profile.role : "viewer";
     $("#user-newrole").disabled = !!profile && profile.user_id === state.user.id;
     $("#user-error").hidden = true;
@@ -1910,7 +1914,14 @@
         const { error } = await state.sb.from("profiles").update({ full_name: name, role }).eq("user_id", editing.user_id);
         if (error) throw new Error(error.message);
         editing.full_name = name; editing.role = role;
-        toast("User updated");
+        const newPw = $("#user-pw").value.trim();
+        if (newPw) {
+          const r = await state.sb.rpc("admin_set_password", { p_uid: editing.user_id, p_password: newPw });
+          if (r.error) throw new Error(r.error.message);
+          toast(`User updated — password reset, give it to ${name}`);
+        } else {
+          toast("User updated");
+        }
       } else {
         if (!email) throw new Error("Enter an email address.");
         const pw = $("#user-pw").value;
