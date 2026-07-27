@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.11.2";
+  const APP_VERSION = "v0.11.3";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -1887,19 +1887,23 @@
     $("#user-role").value = profile ? profile.role : "viewer";
     $("#user-role").disabled = !!profile && profile.user_id === state.user.id;
     $("#user-error").hidden = true;
+    const save = $("#user-save");
+    save.disabled = false; save.classList.remove("is-loading");
+    save.onclick = saveUser;              // direct bind — survives any wiring mishap
     openOverlay("#user-overlay");
   }
   function closeUserModal() { $("#user-overlay").hidden = true; document.body.style.overflow = ""; state.userEditing = null; }
 
   async function saveUser() {
     const err = $("#user-error"); err.hidden = true;
+    const btn = $("#user-save");
     const editing = state.userEditing;
-    const email = $("#user-email").value.trim().toLowerCase();
-    const name = $("#user-name").value.trim();
-    const role = $("#user-role").value;
-    if (!name) { err.textContent = "Enter the user's full name."; err.hidden = false; return; }
-    const btn = $("#user-save"); btn.classList.add("is-loading"); btn.disabled = true;
     try {
+      const email = $("#user-email").value.trim().toLowerCase();
+      const name = $("#user-name").value.trim();
+      const role = $("#user-role").value;
+      if (!name) throw new Error("Enter the user's full name.");
+      btn.classList.add("is-loading"); btn.disabled = true;
       if (editing) {
         if (role === "viewer" && editing.role !== "viewer" && await userOwnsAnything(editing.user_id)) {
           throw new Error("They still own categories, assets or RFP answers — transfer those first.");
@@ -1921,7 +1925,9 @@
       closeUserModal();
       renderAdmin();
     } catch (e) {
+      console.error("saveUser failed:", e);
       err.textContent = e.message || String(e); err.hidden = false;
+      toast(e.message || String(e), "danger");
     }
     btn.classList.remove("is-loading"); btn.disabled = false;
   }
