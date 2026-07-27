@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.11.1";
+  const APP_VERSION = "v0.11.2";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -728,7 +728,7 @@
     $("#import-parse-error").hidden = true;
     showStep("upload");
     $("#import-reset").hidden = true;
-    $("#import-summary").textContent = "Upload an RFP/RFI spreadsheet — we match each question against the knowledge base and draft the response for you.";
+    $("#import-summary").textContent = "Upload new RFPs here — each question is matched against the knowledge base and the response drafted for you.";
   }
 
   async function onImportFile(f) {
@@ -1095,7 +1095,7 @@
     });
     $("#rfps-summary").textContent = state.rfps.length
       ? `${state.rfps.length} response project${state.rfps.length === 1 ? "" : "s"}.`
-      : "Response projects awaiting DRI approval, and finalised documents.";
+      : "A log of all RFPs processed with this tool — in review and finalised.";
   }
 
   async function openRfp(id) {
@@ -1385,7 +1385,7 @@
     $("#board-clear").hidden = !!(activeRfps.length || cards.length);
     $("#board-summary").textContent = (activeRfps.length || cards.length)
       ? `${activeRfps.length} active RFP${activeRfps.length === 1 ? "" : "s"} (${totalPending} answer${totalPending === 1 ? "" : "s"} awaiting approval) · ${totalKb} knowledge-base item${totalKb === 1 ? "" : "s"} outstanding. Visible to everyone signed in.`
-      : "Every outstanding item, by owner. Visible to everyone signed in.";
+      : "Nothing outstanding anywhere.";
 
     if (cards.length) {
       wrap.appendChild(el("h3", null, "Knowledge-base upkeep"));
