@@ -466,49 +466,42 @@
 
           <!-- ---------- RFP HISTORY ---------- -->
           <section id="history-view" class="stack-lg" hidden>
-            <div id="history-list-wrap" class="stack-lg">
-              <header class="rfp-page-head">
-                <div class="stack-2xs">
-                  <h1>RFP History</h1>
-                  <p class="text-secondary" id="history-summary">Every RFP the builder knows about — historical sources and finalised responses.</p>
-                </div>
-              </header>
-              <div class="table-wrap rfp-table-wrap">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>RFP</th>
-                      <th style="width:11rem">Kind</th>
-                      <th style="width:8rem" class="text-center">Questions</th>
-                      <th style="width:16rem" class="text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="history-rows"></tbody>
-                </table>
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>RFP History</h1>
+                <p class="text-secondary" id="history-summary">Pick an RFP to see every question, the answer given, and the knowledge-base entries used.</p>
+              </div>
+            </header>
+            <div class="rfp-toolbar">
+              <div class="field flex-1" style="min-width:20rem">
+                <label class="field-label" for="history-select">RFP</label>
+                <select class="select" id="history-select"></select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="history-sort">Order</label>
+                <select class="select" id="history-sort">
+                  <option value="az">Alphabetical</option>
+                  <option value="date">Most recent first</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label">&nbsp;</label>
+                <button class="button button-primary" id="history-export"><i class="fa-solid fa-file-excel"></i> Download Excel</button>
               </div>
             </div>
-            <div id="history-detail-wrap" class="stack-lg" hidden>
-              <header class="rfp-page-head">
-                <div class="stack-2xs">
-                  <button class="button button-tertiary button-sm" id="history-back" style="align-self:flex-start"><i class="fa-solid fa-arrow-left"></i> All history</button>
-                  <h1 id="history-detail-name">—</h1>
-                  <p class="text-secondary text-sm" id="history-detail-sub">—</p>
-                </div>
-                <button class="button button-primary" id="history-export"><i class="fa-solid fa-file-excel"></i> Download Excel</button>
-              </header>
-              <div class="table-wrap rfp-table-wrap">
-                <table class="table rfp-import-table">
-                  <thead>
-                    <tr>
-                      <th style="width:3rem">#</th>
-                      <th style="width:40%">Question</th>
-                      <th>Answer given</th>
-                      <th style="width:7rem">KB ref</th>
-                    </tr>
-                  </thead>
-                  <tbody id="history-detail-rows"></tbody>
-                </table>
-              </div>
+            <p class="text-secondary text-sm" id="history-detail-sub"></p>
+            <div class="table-wrap rfp-table-wrap">
+              <table class="table rfp-import-table">
+                <thead>
+                  <tr>
+                    <th style="width:3rem">#</th>
+                    <th style="width:40%">Question</th>
+                    <th>Answer given</th>
+                    <th style="width:7rem">KB ref</th>
+                  </tr>
+                </thead>
+                <tbody id="history-detail-rows"></tbody>
+              </table>
             </div>
           </section>
 

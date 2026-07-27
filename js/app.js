@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.8.2";
+  const APP_VERSION = "v0.9.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -106,7 +106,6 @@
     document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeNewQ(); closeCreateModal(); closeApproveModal(); } });
     $$("[data-nav]").forEach(a => a.addEventListener("click", () => {
       if (a.dataset.nav === "rfps") state.currentRfp = null;      // nav always returns to the list
-      if (a.dataset.nav === "history") state.currentHistory = null;
       setTimeout(route, 0);
     }));
     window.addEventListener("hashchange", route);
@@ -339,9 +338,23 @@
         </div>
       </details>` : "";
 
+    const assetsBlock = `
+      <div class="stack-sm">
+        <div class="cluster" style="justify-content:space-between">
+          <h4>Attached assets <span class="badge badge-neutral badge-sm" id="qa-asset-count">–</span></h4>
+          ${isEditor() ? `<button class="button button-secondary button-sm" id="qa-asset-add-btn"><i class="fa-solid fa-paperclip"></i> Add assets</button>` : ""}
+        </div>
+        <div id="qa-assets"><span class="spinner spinner--sm" role="status" aria-label="Loading"></span></div>
+        <div id="qa-asset-picker" class="cluster cluster-sm" hidden>
+          <select class="select select-sm" id="qa-asset-cat" style="max-width:12rem"><option value="">— Category —</option></select>
+          <select class="select select-sm flex-1" id="qa-asset-item" disabled><option value="">— Pick an asset —</option></select>
+          <button class="button button-primary button-sm" id="qa-asset-confirm" disabled><i class="fa-solid fa-plus"></i> Attach</button>
+        </div>
+      </div>`;
+
     body.innerHTML =
       `<div class="stack-2xs"><h3>${esc(row.question)}</h3><span class="text-secondary">${esc(row.category)}</span></div>` +
-      attestBlock + answerArea + metaBlock + resBlock +
+      attestBlock + answerArea + assetsBlock + metaBlock + resBlock +
       `<div class="stack-sm"><h4>Provenance <span class="badge badge-neutral badge-sm">${state.provCounts[row.id] || 0}</span></h4>
         <div id="prov-list"><span class="spinner spinner--sm" role="status" aria-label="Loading"></span></div></div>` +
       (editable ? `<details class="rfp-edit-card"><summary><strong>Answer history</strong></summary><div id="ver-list" style="margin-top:var(--space-sm)"></div></details>` : "");
@@ -356,7 +369,88 @@
     on("[data-delete]", () => deleteQuestion(row));
     const verDetails = $("details:last-of-type", body);
     if (editable && verDetails) verDetails.addEventListener("toggle", () => { if (verDetails.open) loadVersions(row.id); }, { once: true });
+    wireAssetPicker(row);
+    loadQuestionAssets(row);
     if (!editing) loadProvenance(row.id);
+  }
+
+  // ---- attached assets (Library items bound to a question) ----------------
+  async function loadQuestionAssets(row) {
+    const box = $("#qa-assets"); if (!box) return;
+    const [qr, res] = await Promise.all([
+      state.sb.from("question_resources").select("resource_id").eq("question_id", row.id),
+      state.sb.from("resources").select("*")
+    ]);
+    if (!$("#qa-assets")) return;                    // drawer re-rendered meanwhile
+    state.resources = res.data || state.resources;
+    const bound = (qr.data || []).map(x => state.resources.find(r => r.id === x.resource_id)).filter(Boolean);
+    $("#qa-asset-count").textContent = bound.length;
+    if (!bound.length) { box.innerHTML = `<p class="text-secondary text-sm">No assets attached yet.</p>`; return; }
+    box.innerHTML = "";
+    bound.forEach(r => {
+      const item = el("div", "cluster cluster-sm rfp-qa-asset");
+      item.innerHTML =
+        `<i class="fa-solid ${LIB_ICON[r.section] || "fa-paperclip"} text-secondary"></i>` +
+        `<span class="flex-1"><strong class="text-sm">${esc(r.name)}</strong> <span class="badge badge-neutral badge-sm">${esc(r.section || "—")}</span></span>`;
+      if (r.url) { const a = el("a", "button button-tertiary button-sm", '<i class="fa-solid fa-arrow-up-right-from-square"></i>'); a.href = r.url; a.target = "_blank"; a.rel = "noopener"; item.appendChild(a); }
+      if (r.file_ref) {
+        const dl = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-download"></i>');
+        dl.addEventListener("click", async () => {
+          const { data, error } = await state.sb.storage.from("library").createSignedUrl(r.file_ref, 3600);
+          if (error) return toast(error.message, "danger");
+          const a = el("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener";
+          document.body.appendChild(a); a.click(); a.remove();
+        });
+        item.appendChild(dl);
+      }
+      if (isEditor()) {
+        const rm = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-xmark"></i>');
+        rm.title = "Detach from this question";
+        rm.addEventListener("click", async () => {
+          const { error } = await state.sb.from("question_resources").delete().eq("question_id", row.id).eq("resource_id", r.id);
+          if (error) return toast(error.message, "danger");
+          toast("Asset detached");
+          loadQuestionAssets(row);
+        });
+        item.appendChild(rm);
+      }
+      box.appendChild(item);
+    });
+  }
+
+  function wireAssetPicker(row) {
+    const btn = $("#qa-asset-add-btn"); if (!btn) return;
+    const picker = $("#qa-asset-picker"), catSel = $("#qa-asset-cat"), itemSel = $("#qa-asset-item"), confirmBtn = $("#qa-asset-confirm");
+    btn.addEventListener("click", () => {
+      picker.hidden = !picker.hidden;
+      if (!picker.hidden) {
+        catSel.innerHTML = `<option value="">— Category —</option>`;
+        LIB_SECTIONS.forEach(sec => {
+          const n = state.resources.filter(r => (r.section || "Certifications") === sec).length;
+          if (n) catSel.appendChild(new Option(`${sec} (${n})`, sec));
+        });
+        itemSel.innerHTML = `<option value="">— Pick an asset —</option>`; itemSel.disabled = true; confirmBtn.disabled = true;
+      }
+    });
+    catSel.addEventListener("change", async () => {
+      const sec = catSel.value;
+      itemSel.innerHTML = `<option value="">— Pick an asset —</option>`;
+      itemSel.disabled = !sec; confirmBtn.disabled = true;
+      if (!sec) return;
+      const { data: qr } = await state.sb.from("question_resources").select("resource_id").eq("question_id", row.id);
+      const boundIds = new Set((qr || []).map(x => x.resource_id));
+      state.resources.filter(r => (r.section || "Certifications") === sec && !boundIds.has(r.id))
+        .forEach(r => itemSel.appendChild(new Option(r.name, r.id)));
+    });
+    itemSel.addEventListener("change", () => { confirmBtn.disabled = !itemSel.value; });
+    confirmBtn.addEventListener("click", async () => {
+      if (!itemSel.value) return;
+      const { error } = await state.sb.from("question_resources").insert({ question_id: row.id, resource_id: itemSel.value });
+      if (error) return toast(error.message, "danger");
+      toast("Asset attached");
+      picker.hidden = true;
+      loadQuestionAssets(row);
+    });
   }
 
   async function loadProvenance(id) {
@@ -591,7 +685,8 @@
     $("#approve-save").addEventListener("click", saveApprove);
     $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
     $("#rfp-back").addEventListener("click", () => { state.currentRfp = null; renderRfps(); });
-    $("#history-back").addEventListener("click", () => { state.currentHistory = null; renderHistory(); });
+    $("#history-select").addEventListener("change", () => openHistory($("#history-select").value));
+    $("#history-sort").addEventListener("change", () => renderHistory());
     $("#history-export").addEventListener("click", exportHistoryExcel);
     $$("[data-res-close]").forEach(b => b.addEventListener("click", closeResModal));
     $("#res-save").addEventListener("click", saveResource);
@@ -1203,16 +1298,62 @@
   const BOARD_BADGE = {
     write:   { cls: "badge-warning", label: "Write answer" },
     rework:  { cls: "badge-info",    label: "Rework" },
-    confirm: { cls: "badge-neutral", label: "Confirm" },
-    rfp:     { cls: "badge-brand",   label: "RFP answer" }
+    confirm: { cls: "badge-neutral", label: "Confirm" }
   };
 
   async function renderBoard() {
-    const { data: pend } = await state.sb.from("rfp_rows")
-      .select("id,rfp_id,seq,question,band,assigned_to,rfps(name,status)")
-      .eq("status", "pending");
-    const pending = (pend || []).filter(r => !r.rfps || r.rfps.status !== "finalised");
+    // Active RFPs with their pending rows (grouped per RFP, per person)
+    const [projQ, rowsQ] = await Promise.all([
+      state.sb.from("rfps").select("id,name,status,created_by,created_at").eq("status", "in_review"),
+      state.sb.from("rfp_rows").select("id,rfp_id,seq,question,band,include,status,assigned_to")
+    ]);
+    const activeRfps = projQ.data || [];
+    const rowsByRfp = {};
+    (rowsQ.data || []).forEach(r => { (rowsByRfp[r.rfp_id] = rowsByRfp[r.rfp_id] || []).push(r); });
 
+    const wrap = $("#board-list"); wrap.innerHTML = "";
+
+    // ---- Section 1: one card per active RFP — who is holding it up --------
+    if (activeRfps.length) {
+      wrap.appendChild(el("h3", null, "Active RFPs"));
+      activeRfps
+        .slice().sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        .forEach(p => {
+          const rows = (rowsByRfp[p.id] || []).filter(r => r.include);
+          const pend = rows.filter(r => r.status === "pending");
+          const done = rows.length - pend.length;
+          const byPerson = {};
+          pend.forEach(r => { (byPerson[r.assigned_to || "?"] = byPerson[r.assigned_to || "?"] || []).push(r); });
+          const det = el("details", "card rfp-board-card" + (pend.length ? "" : " rfp-board-done"));
+          if (pend.length) det.open = false;
+          det.innerHTML =
+            `<summary class="rfp-board-head">
+              <span class="cluster cluster-sm"><i class="fa-solid fa-folder-open text-secondary"></i><strong>${esc(p.name)}</strong>
+                <span class="text-secondary text-sm">${done} / ${rows.length} approved</span></span>
+              <span class="cluster cluster-sm">${
+                pend.length
+                  ? Object.entries(byPerson).map(([uid, list]) =>
+                      `<span class="badge badge-warning badge-sm">${esc(uid === "?" ? "Unassigned" : nameOf(uid))}: ${list.length}</span>`).join(" ")
+                  : '<span class="badge badge-success badge-sm">Ready to finalise</span>'
+              }<strong class="rfp-board-total">${pend.length}</strong></span>
+            </summary>
+            <div class="rfp-board-items">${
+              pend.length
+                ? Object.entries(byPerson).map(([uid, list]) => `
+                    <div class="rfp-board-person"><strong class="text-sm">${esc(uid === "?" ? "Unassigned" : nameOf(uid))}</strong> <span class="text-secondary text-xs">is holding ${list.length} answer${list.length === 1 ? "" : "s"}</span></div>` +
+                    list.map(r => `
+                    <div class="rfp-board-item" data-open-rfp="${esc(p.id)}">
+                      <span class="badge ${(IMP_BAND[r.band] || IMP_BAND.gap).cls} badge-sm">${(IMP_BAND[r.band] || IMP_BAND.gap).label}</span>
+                      <span class="text-sm rfp-board-q">${esc(r.question.slice(0, 140))}</span>
+                    </div>`).join("")).join("")
+                : '<p class="text-secondary text-sm" style="margin:0">Everything approved — the owner can finalise.</p>'
+            }</div>`;
+          $$("[data-open-rfp]", det).forEach(n => n.addEventListener("click", () => openRfp(n.dataset.openRfp)));
+          wrap.appendChild(det);
+        });
+    }
+
+    // ---- Section 2: knowledge-base upkeep, per person ---------------------
     const cards = editorProfiles().map(p => {
       const catIds = new Set(state.drisAll.filter(d => d.user_id === p.user_id).map(d => d.category_id));
       const items = [];
@@ -1221,48 +1362,48 @@
         const kind = boardTodoFor(q);
         if (kind) items.push({ kind, ref: q.id, text: q.question, q });
       });
-      pending.filter(r => r.assigned_to === p.user_id).forEach(r =>
-        items.push({ kind: "rfp", ref: r.rfps ? r.rfps.name : "RFP", text: r.question, rfpId: r.rfp_id }));
-      const counts = { write: 0, rework: 0, confirm: 0, rfp: 0 };
+      const counts = { write: 0, rework: 0, confirm: 0 };
       items.forEach(i => counts[i.kind]++);
       return { p, items, counts };
     }).filter(c => c.items.length).sort((a, b) => b.items.length - a.items.length);
 
-    $("#board-clear").hidden = cards.length > 0;
-    const wrap = $("#board-list"); wrap.innerHTML = "";
-    const totalItems = cards.reduce((n, c) => n + c.items.length, 0);
-    $("#board-summary").textContent = cards.length
-      ? `${totalItems} outstanding item${totalItems === 1 ? "" : "s"} across ${cards.length} ${cards.length === 1 ? "person" : "people"} — most outstanding first. Visible to everyone signed in.`
+    const totalPending = activeRfps.reduce((n, p) => n + ((rowsByRfp[p.id] || []).filter(r => r.include && r.status === "pending").length), 0);
+    const totalKb = cards.reduce((n, c) => n + c.items.length, 0);
+    $("#board-clear").hidden = !!(activeRfps.length || cards.length);
+    $("#board-summary").textContent = (activeRfps.length || cards.length)
+      ? `${activeRfps.length} active RFP${activeRfps.length === 1 ? "" : "s"} (${totalPending} answer${totalPending === 1 ? "" : "s"} awaiting approval) · ${totalKb} knowledge-base item${totalKb === 1 ? "" : "s"} outstanding. Visible to everyone signed in.`
       : "Every outstanding item, by owner. Visible to everyone signed in.";
 
-    cards.forEach((c, idx) => {
-      const name = c.p.full_name || c.p.email;
-      const badges = Object.entries(c.counts).filter(([, n]) => n)
-        .map(([k, n]) => `<span class="badge ${BOARD_BADGE[k].cls} badge-sm">${n} ${BOARD_BADGE[k].label}${n === 1 ? "" : "s"}</span>`).join(" ");
-      const det = el("details", "card rfp-board-card" + (idx === 0 ? " rfp-board-top" : ""));
-      det.innerHTML =
-        `<summary class="rfp-board-head">
-          <span class="cluster cluster-sm">
-            <span class="avatar avatar-sm">${esc(name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase())}</span>
-            <strong>${esc(name)}</strong>
-            ${c.p.user_id === state.user.id ? '<span class="text-secondary text-sm">(you)</span>' : ""}
-          </span>
-          <span class="cluster cluster-sm">${badges}<strong class="rfp-board-total">${c.items.length}</strong></span>
-        </summary>
-        <div class="rfp-board-items">
-          ${c.items.map(i => `
-            <div class="rfp-board-item" ${i.q ? `data-open-q="${esc(i.q.id)}"` : (i.rfpId ? `data-open-rfp="${esc(i.rfpId)}"` : "")}>
-              <span class="badge ${BOARD_BADGE[i.kind].cls} badge-sm">${BOARD_BADGE[i.kind].label}</span>
-              <code class="text-xs">${esc(i.ref)}</code>
-              <span class="text-sm rfp-board-q">${esc(i.text.slice(0, 140))}</span>
-            </div>`).join("")}
-        </div>`;
-      $$("[data-open-q]", det).forEach(n => n.addEventListener("click", () => {
-        const q = state.questions.find(x => x.id === n.dataset.openQ); if (q) openDrawer(q);
-      }));
-      $$("[data-open-rfp]", det).forEach(n => n.addEventListener("click", () => openRfp(n.dataset.openRfp)));
-      wrap.appendChild(det);
-    });
+    if (cards.length) {
+      wrap.appendChild(el("h3", null, "Knowledge-base upkeep"));
+      cards.forEach((c, idx) => {
+        const name = c.p.full_name || c.p.email;
+        const badges = Object.entries(c.counts).filter(([, n]) => n)
+          .map(([k, n]) => `<span class="badge ${BOARD_BADGE[k].cls} badge-sm">${n} ${BOARD_BADGE[k].label}${n === 1 ? "" : "s"}</span>`).join(" ");
+        const det = el("details", "card rfp-board-card" + (idx === 0 ? " rfp-board-top" : ""));
+        det.innerHTML =
+          `<summary class="rfp-board-head">
+            <span class="cluster cluster-sm">
+              <span class="avatar avatar-sm">${esc(name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase())}</span>
+              <strong>${esc(name)}</strong>
+              ${c.p.user_id === state.user.id ? '<span class="text-secondary text-sm">(you)</span>' : ""}
+            </span>
+            <span class="cluster cluster-sm">${badges}<strong class="rfp-board-total">${c.items.length}</strong></span>
+          </summary>
+          <div class="rfp-board-items">
+            ${c.items.map(i => `
+              <div class="rfp-board-item" data-open-q="${esc(i.q.id)}">
+                <span class="badge ${BOARD_BADGE[i.kind].cls} badge-sm">${BOARD_BADGE[i.kind].label}</span>
+                <code class="text-xs">${esc(i.ref)}</code>
+                <span class="text-sm rfp-board-q">${esc(i.text.slice(0, 140))}</span>
+              </div>`).join("")}
+          </div>`;
+        $$("[data-open-q]", det).forEach(n => n.addEventListener("click", () => {
+          const q = state.questions.find(x => x.id === n.dataset.openQ); if (q) openDrawer(q);
+        }));
+        wrap.appendChild(det);
+      });
+    }
   }
 
   /* ========================================================================
@@ -1304,61 +1445,52 @@
   }
 
   async function renderHistory() {
-    $("#history-list-wrap").hidden = !!state.currentHistory;
-    $("#history-detail-wrap").hidden = !state.currentHistory;
-    if (state.currentHistory) { renderHistoryDetail(); return; }
     const [prov, srcs, rfps] = await Promise.all([
       loadAllProvenance(),
       state.sb.from("sources").select("name,kind,tier,source_date"),
-      state.sb.from("rfps").select("name,status,finalised_at")
+      state.sb.from("rfps").select("name,status,finalised_at,created_at")
     ]);
     const srcList = (srcs.data || []).slice().sort((a, b) => b.name.length - a.name.length);
-    const groups = {};   // label -> count
+    const groups = {};   // label -> { count, date, kind }
     prov.forEach(r => {
       const label = histLabelFor(r.source_name, srcList);
-      groups[label] = (groups[label] || 0) + 1;
+      const g = groups[label] || (groups[label] = { count: 0 });
+      g.count++;
     });
-    const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
-    const tb = $("#history-rows"); tb.innerHTML = "";
+    Object.keys(groups).forEach(label => {
+      const src = srcList.find(s => s.name === label);
+      const proj = label.startsWith("RFP: ") ? (rfps.data || []).find(p => "RFP: " + p.name === label) : null;
+      groups[label].date = proj ? (proj.finalised_at || proj.created_at) : (src && src.source_date) || null;
+      groups[label].kind = proj ? "Response project" : (src && src.kind) || "Source";
+    });
+    const sort = $("#history-sort").value || "az";
+    const names = Object.keys(groups).sort((a, b) => sort === "date"
+      ? String(groups[b].date || "") .localeCompare(String(groups[a].date || "")) || a.localeCompare(b)
+      : a.localeCompare(b));
+    const sel = $("#history-select"); sel.innerHTML = "";
     names.forEach(nm => {
-      const src = srcList.find(s => s.name === nm) || null;
-      const counts = groups;
-      const proj = nm.startsWith("RFP: ") ? (rfps.data || []).find(p => "RFP: " + p.name === nm) : null;
-      const kind = proj
-        ? `<span class="badge badge-brand badge-sm">Response project</span>`
-        : `<span class="badge badge-neutral badge-sm">${esc(src && src.kind ? src.kind : "Source")}</span>`;
-      const tr = el("tr");
-      tr.innerHTML =
-        `<td><strong>${esc(nm.replace(/^RFP: /, ""))}</strong>${src && src.source_date ? ` <span class="text-secondary text-sm">· ${esc(src.source_date)}</span>` : ""}${proj && proj.finalised_at ? ` <span class="text-secondary text-sm">· finalised ${fmtDate(proj.finalised_at)}</span>` : ""}</td>` +
-        `<td>${kind}</td>` +
-        `<td class="text-center">${counts[nm]}</td>` +
-        `<td class="text-right"></td>`;
-      const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
-      const view = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-eye"></i> View Q&A');
-      view.addEventListener("click", () => openHistory(nm));
-      const dl = el("button", "button button-primary button-sm", '<i class="fa-solid fa-file-excel"></i> Excel');
-      dl.addEventListener("click", async () => { await openHistory(nm, true); exportHistoryExcel(); });
-      actions.append(view, dl);
-      tr.lastChild.appendChild(actions);
-      tb.appendChild(tr);
+      const g = groups[nm];
+      const label = `${nm.replace(/^RFP: /, "")} — ${g.count} Q${g.count === 1 ? "" : "s"}${g.date ? ` · ${String(g.date).slice(0, 10)}` : ""}`;
+      sel.appendChild(new Option(label, nm));
     });
-    $("#history-summary").textContent = names.length
-      ? `${names.length} RFPs on record — historical sources and finalised responses.`
-      : "Every RFP the builder knows about — historical sources and finalised responses.";
+    if (!names.length) { $("#history-summary").textContent = "No RFPs on record yet."; return; }
+    if (!state.currentHistory || !names.includes(state.currentHistory)) state.currentHistory = names[0];
+    sel.value = state.currentHistory;
+    $("#history-summary").textContent = `${names.length} RFPs on record. Pick one to see every question, the answer given, and the knowledge-base entries used.`;
+    await openHistory(state.currentHistory);
   }
 
-  async function openHistory(name, silent) {
+    async function openHistory(name) {
     const [prov, srcs] = await Promise.all([loadAllProvenance(), state.sb.from("sources").select("name")]);
     const srcList = (srcs.data || []).slice().sort((a, b) => b.name.length - a.name.length);
     state.currentHistory = name;
     state.currentHistoryRows = prov.filter(r => histLabelFor(r.source_name, srcList) === name);
-    if (!silent) renderHistory();
+    renderHistoryDetail();
   }
 
   function renderHistoryDetail() {
     const name = state.currentHistory, rows = state.currentHistoryRows;
-    $("#history-detail-name").textContent = name.replace(/^RFP: /, "");
-    $("#history-detail-sub").textContent = `${rows.length} question${rows.length === 1 ? "" : "s"} on record.`;
+    $("#history-detail-sub").textContent = `${name.replace(/^RFP: /, "")} — ${rows.length} question${rows.length === 1 ? "" : "s"} on record.`;
     const tb = $("#history-detail-rows"); tb.innerHTML = "";
     rows.forEach((r, i) => {
       const tr = el("tr");
@@ -1410,11 +1542,13 @@
   /* ========================================================================
      LIBRARY — supporting videos, docs, certifications, images (v0.8.0)
      ======================================================================== */
-  const LIB_SECTIONS = ["General Videos", "Testimonial Videos", "Testimonial Docs", "Brochures", "Certifications", "Support Images"];
+  const LIB_SECTIONS = ["General Videos", "Testimonial Videos", "Testimonial Docs", "Brochures", "Certifications", "Support Images", "General Assets", "Legal Assets"];
+  const LIB_VIDEO_SECTIONS = ["General Videos", "Testimonial Videos"];
   const LIB_ICON = {
     "General Videos": "fa-circle-play", "Testimonial Videos": "fa-circle-play",
     "Testimonial Docs": "fa-file-lines", "Brochures": "fa-book-open",
-    "Certifications": "fa-certificate", "Support Images": "fa-image"
+    "Certifications": "fa-certificate", "Support Images": "fa-image",
+    "General Assets": "fa-box-archive", "Legal Assets": "fa-scale-balanced"
   };
 
   async function renderLibrary() {
@@ -1502,6 +1636,12 @@
     const sel = $("#res-section"); sel.innerHTML = "";
     LIB_SECTIONS.forEach(s => sel.appendChild(new Option(s, s)));
     sel.value = section;
+    const syncVideoOnly = () => {
+      const videoOnly = LIB_VIDEO_SECTIONS.includes(sel.value);
+      $("#res-file").closest(".field").hidden = videoOnly;
+      if (videoOnly) $("#res-file").value = "";
+    };
+    sel.onchange = syncVideoOnly; syncVideoOnly();
     $("#res-name").value = ""; $("#res-summary").value = ""; $("#res-url").value = ""; $("#res-file").value = "";
     $("#res-error").hidden = true;
     openOverlay("#res-overlay");
@@ -1516,6 +1656,10 @@
     const url = $("#res-url").value.trim() || null;
     const file = $("#res-file").files[0] || null;
     if (!name) { err.textContent = "Give it a name."; err.hidden = false; return; }
+    if (LIB_VIDEO_SECTIONS.includes(section)) {
+      if (file) { err.textContent = "Videos are link-only — paste a YouTube/Vimeo/public URL instead of uploading."; err.hidden = false; return; }
+      if (!url) { err.textContent = "Paste the video URL."; err.hidden = false; return; }
+    }
     if (!url && !file) { err.textContent = "Provide a link or upload a file."; err.hidden = false; return; }
     if (url && file) { err.textContent = "Link or file — not both."; err.hidden = false; return; }
     const btn = $("#res-save"); btn.classList.add("is-loading"); btn.disabled = true;
