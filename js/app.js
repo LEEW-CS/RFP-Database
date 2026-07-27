@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.8.1";
+  const APP_VERSION = "v0.8.2";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -1169,6 +1169,7 @@
       }).eq("id", p.id);
       if (error) throw new Error(error.message);
 
+      state.provAll = null;   // history cache now stale
       toast(`Finalised — ${rows.length} answers written, provenance recorded`);
       await openRfp(p.id);
     } catch (e) {
@@ -1267,31 +1268,61 @@
   /* ========================================================================
      RFP HISTORY — every RFP with a provenance trail (v0.8.0)
      ======================================================================== */
+  // Phase-0 provenance stores per-row source names in several ad-hoc formats.
+  // These aliases map each locked historical format to its source RFP; new
+  // provenance from Finalise is always "RFP: <name>" and needs no alias.
+  const HIST_ALIASES = [
+    [/^Vocus RFI/, "Vocus CC & BPO RFI"],
+    [/^Sophos/, "Sophos RFP Questionnaire"],
+    [/^Pie Insurance/, "Pie Insurance BPO RFP"],
+    [/^MNG /, "MNG RFP"],
+    [/^Handler /, "Handler RFI + Pricing Schedule"],
+    [/^Kensington /, "Kensington Tours pre-qualification"],
+    [/^SquareSpace /, "SquareSpace proposal"]
+  ];
+  function histLabelFor(sourceName, srcList) {
+    const alias = HIST_ALIASES.find(([re]) => re.test(sourceName));
+    if (alias) return alias[1];
+    const src = srcList.find(s => sourceName.startsWith(s.name));
+    return src ? src.name : sourceName;
+  }
+
+  async function loadAllProvenance() {
+    if (state.provAll) return state.provAll;
+    let all = [], page = 0;
+    for (;;) {
+      const { data, error } = await state.sb.from("provenance")
+        .select("question_id,source_name,source_ref,original_question,original_answer")
+        .order("id").range(page * 1000, page * 1000 + 999);
+      if (error) { toast(error.message, "danger"); break; }
+      all = all.concat(data || []);
+      if (!data || data.length < 1000) break;
+      page++;
+    }
+    state.provAll = all;
+    return all;
+  }
+
   async function renderHistory() {
     $("#history-list-wrap").hidden = !!state.currentHistory;
     $("#history-detail-wrap").hidden = !state.currentHistory;
     if (state.currentHistory) { renderHistoryDetail(); return; }
     const [prov, srcs, rfps] = await Promise.all([
-      state.sb.from("provenance").select("source_name").range(0, 9999),
+      loadAllProvenance(),
       state.sb.from("sources").select("name,kind,tier,source_date"),
       state.sb.from("rfps").select("name,status,finalised_at")
     ]);
-    // Phase-0 provenance often stores per-row source names ("AI Q&A DB AIQA-CP-10"),
-    // so roll rows up under the longest matching name from the sources table.
     const srcList = (srcs.data || []).slice().sort((a, b) => b.name.length - a.name.length);
-    const groups = {};   // label -> { count, src, key }
-    (prov.data || []).forEach(r => {
-      const src = srcList.find(s => r.source_name.startsWith(s.name));
-      const label = src ? src.name : r.source_name;
-      const g = groups[label] || (groups[label] = { count: 0, src, key: src ? { like: src.name + "%" } : { eq: r.source_name } });
-      g.count++;
+    const groups = {};   // label -> count
+    prov.forEach(r => {
+      const label = histLabelFor(r.source_name, srcList);
+      groups[label] = (groups[label] || 0) + 1;
     });
     const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
     const tb = $("#history-rows"); tb.innerHTML = "";
     names.forEach(nm => {
-      const g = groups[nm];
-      const src = g.src;
-      const counts = { [nm]: g.count };
+      const src = srcList.find(s => s.name === nm) || null;
+      const counts = groups;
       const proj = nm.startsWith("RFP: ") ? (rfps.data || []).find(p => "RFP: " + p.name === nm) : null;
       const kind = proj
         ? `<span class="badge badge-brand badge-sm">Response project</span>`
@@ -1304,9 +1335,9 @@
         `<td class="text-right"></td>`;
       const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
       const view = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-eye"></i> View Q&A');
-      view.addEventListener("click", () => openHistory(nm, g.key));
+      view.addEventListener("click", () => openHistory(nm));
       const dl = el("button", "button button-primary button-sm", '<i class="fa-solid fa-file-excel"></i> Excel');
-      dl.addEventListener("click", async () => { await openHistory(nm, g.key, true); exportHistoryExcel(); });
+      dl.addEventListener("click", async () => { await openHistory(nm, true); exportHistoryExcel(); });
       actions.append(view, dl);
       tr.lastChild.appendChild(actions);
       tb.appendChild(tr);
@@ -1316,14 +1347,11 @@
       : "Every RFP the builder knows about — historical sources and finalised responses.";
   }
 
-  async function openHistory(name, key, silent) {
-    let q = state.sb.from("provenance")
-      .select("question_id,source_name,source_ref,original_question,original_answer");
-    q = (key && key.like) ? q.like("source_name", key.like) : q.eq("source_name", (key && key.eq) || name);
-    const { data, error } = await q.order("id").range(0, 9999);
-    if (error) { toast(error.message, "danger"); return; }
+  async function openHistory(name, silent) {
+    const [prov, srcs] = await Promise.all([loadAllProvenance(), state.sb.from("sources").select("name")]);
+    const srcList = (srcs.data || []).slice().sort((a, b) => b.name.length - a.name.length);
     state.currentHistory = name;
-    state.currentHistoryRows = data || [];
+    state.currentHistoryRows = prov.filter(r => histLabelFor(r.source_name, srcList) === name);
     if (!silent) renderHistory();
   }
 
