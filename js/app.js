@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.7.0";
+  const APP_VERSION = "v0.8.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -64,7 +64,9 @@
     currentRfp: null,   // open response project
     currentRfpRows: [], // its rows
     rfpTodos: [],       // pending rfp_rows assigned to me
-    approveRow: null    // row open in the approve modal
+    approveRow: null,   // row open in the approve modal
+    currentHistory: null, currentHistoryRows: [],   // RFP History detail
+    resSection: null    // section being added to in the Library modal
   };
 
   const isAdmin = () => (state.profile && state.profile.role === "admin");
@@ -103,7 +105,8 @@
     $$("[data-approve-close]").forEach(b => b.addEventListener("click", closeApproveModal));
     document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeNewQ(); closeCreateModal(); closeApproveModal(); } });
     $$("[data-nav]").forEach(a => a.addEventListener("click", () => {
-      if (a.dataset.nav === "rfps") state.currentRfp = null;   // nav always returns to the list
+      if (a.dataset.nav === "rfps") state.currentRfp = null;      // nav always returns to the list
+      if (a.dataset.nav === "history") state.currentHistory = null;
       setTimeout(route, 0);
     }));
     window.addEventListener("hashchange", route);
@@ -196,18 +199,24 @@
     if (hash.includes("attest")) view = "attest";
     else if (hash.includes("import")) view = "import";
     else if (hash.includes("rfps")) view = "rfps";
+    else if (hash.includes("history")) view = "history";
+    else if (hash.includes("library")) view = "library";
     else if (hash.includes("board")) view = "board";
     else if (hash.includes("admin")) view = isAdmin() ? "admin" : "browser";
     $("#browser-view").hidden = view !== "browser";
     $("#attest-view").hidden = view !== "attest";
     $("#import-view").hidden = view !== "import";
     $("#rfps-view").hidden = view !== "rfps";
+    $("#history-view").hidden = view !== "history";
+    $("#library-view").hidden = view !== "library";
     $("#board-view").hidden = view !== "board";
     $("#admin-view").hidden = view !== "admin";
     $$("[data-nav]").forEach(a => a.classList.toggle("is-active", a.dataset.nav === view));
     if (view === "browser") renderBrowser();
     else if (view === "attest") renderAttest();
     else if (view === "rfps") renderRfps();
+    else if (view === "history") renderHistory();
+    else if (view === "library") renderLibrary();
     else if (view === "board") renderBoard();
     else if (view === "admin") renderAdmin();
     else renderImport();
@@ -582,6 +591,10 @@
     $("#approve-save").addEventListener("click", saveApprove);
     $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
     $("#rfp-back").addEventListener("click", () => { state.currentRfp = null; renderRfps(); });
+    $("#history-back").addEventListener("click", () => { state.currentHistory = null; renderHistory(); });
+    $("#history-export").addEventListener("click", exportHistoryExcel);
+    $$("[data-res-close]").forEach(b => b.addEventListener("click", closeResModal));
+    $("#res-save").addEventListener("click", saveResource);
     $("#rfp-finalise").addEventListener("click", finaliseRfp);
     $("#rfp-download-final").addEventListener("click", downloadFinal);
   }
@@ -1249,6 +1262,238 @@
       $$("[data-open-rfp]", det).forEach(n => n.addEventListener("click", () => openRfp(n.dataset.openRfp)));
       wrap.appendChild(det);
     });
+  }
+
+  /* ========================================================================
+     RFP HISTORY — every RFP with a provenance trail (v0.8.0)
+     ======================================================================== */
+  async function renderHistory() {
+    $("#history-list-wrap").hidden = !!state.currentHistory;
+    $("#history-detail-wrap").hidden = !state.currentHistory;
+    if (state.currentHistory) { renderHistoryDetail(); return; }
+    const [prov, srcs, rfps] = await Promise.all([
+      state.sb.from("provenance").select("source_name").range(0, 9999),
+      state.sb.from("sources").select("name,kind,tier,source_date"),
+      state.sb.from("rfps").select("name,status,finalised_at")
+    ]);
+    const counts = {};
+    (prov.data || []).forEach(r => { counts[r.source_name] = (counts[r.source_name] || 0) + 1; });
+    const names = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+    const tb = $("#history-rows"); tb.innerHTML = "";
+    names.forEach(nm => {
+      const src = (srcs.data || []).find(s => nm.startsWith(s.name));
+      const proj = nm.startsWith("RFP: ") ? (rfps.data || []).find(p => "RFP: " + p.name === nm) : null;
+      const kind = proj
+        ? `<span class="badge badge-brand badge-sm">Response project</span>`
+        : `<span class="badge badge-neutral badge-sm">${esc(src && src.kind ? src.kind : "Source")}</span>`;
+      const tr = el("tr");
+      tr.innerHTML =
+        `<td><strong>${esc(nm.replace(/^RFP: /, ""))}</strong>${src && src.source_date ? ` <span class="text-secondary text-sm">· ${esc(src.source_date)}</span>` : ""}${proj && proj.finalised_at ? ` <span class="text-secondary text-sm">· finalised ${fmtDate(proj.finalised_at)}</span>` : ""}</td>` +
+        `<td>${kind}</td>` +
+        `<td class="text-center">${counts[nm]}</td>` +
+        `<td class="text-right"></td>`;
+      const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
+      const view = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-eye"></i> View Q&A');
+      view.addEventListener("click", () => openHistory(nm));
+      const dl = el("button", "button button-primary button-sm", '<i class="fa-solid fa-file-excel"></i> Excel');
+      dl.addEventListener("click", async () => { await openHistory(nm, true); exportHistoryExcel(); });
+      actions.append(view, dl);
+      tr.lastChild.appendChild(actions);
+      tb.appendChild(tr);
+    });
+    $("#history-summary").textContent = names.length
+      ? `${names.length} RFPs on record — historical sources and finalised responses.`
+      : "Every RFP the builder knows about — historical sources and finalised responses.";
+  }
+
+  async function openHistory(name, silent) {
+    const { data, error } = await state.sb.from("provenance")
+      .select("question_id,source_ref,original_question,original_answer")
+      .eq("source_name", name).order("id").range(0, 9999);
+    if (error) { toast(error.message, "danger"); return; }
+    state.currentHistory = name;
+    state.currentHistoryRows = data || [];
+    if (!silent) renderHistory();
+  }
+
+  function renderHistoryDetail() {
+    const name = state.currentHistory, rows = state.currentHistoryRows;
+    $("#history-detail-name").textContent = name.replace(/^RFP: /, "");
+    $("#history-detail-sub").textContent = `${rows.length} question${rows.length === 1 ? "" : "s"} on record.`;
+    const tb = $("#history-detail-rows"); tb.innerHTML = "";
+    rows.forEach((r, i) => {
+      const tr = el("tr");
+      tr.innerHTML =
+        `<td class="text-secondary text-sm">${i + 1}</td>` +
+        `<td class="rfp-imp-q">${esc((r.original_question || "—").slice(0, 300))}${r.source_ref ? `<small class="text-secondary">${esc(r.source_ref)}</small>` : ""}</td>` +
+        `<td class="text-sm">${esc((r.original_answer || "—").slice(0, 400))}</td>` +
+        `<td>${r.question_id ? `<a href="#" class="text-sm" data-hview="${esc(r.question_id)}">${esc(r.question_id)}</a>` : "—"}</td>`;
+      const a = $("[data-hview]", tr);
+      if (a) a.addEventListener("click", e => { e.preventDefault(); const q = state.questions.find(x => x.id === a.dataset.hview); if (q) openDrawer(q); });
+      tb.appendChild(tr);
+    });
+  }
+
+  async function exportHistoryExcel() {
+    if (!state.currentHistory || !window.ExcelJS) { if (!window.ExcelJS) toast("Excel engine still loading — try again in a second.", "danger"); return; }
+    const name = state.currentHistory.replace(/^RFP: /, "");
+    const rows = state.currentHistoryRows;
+    const BRAND = "FF007AFF", DARK = "FF14293E", LIGHT = "FFF2F7FF";
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "Cloudstaff RFP Builder";
+    const ws = wb.addWorksheet("RFP Q&A", { views: [{ state: "frozen", ySplit: 4 }] });
+    ws.columns = [{ width: 6 }, { width: 60 }, { width: 80 }, { width: 12 }];
+    ws.mergeCells("A1:D1"); ws.mergeCells("A2:D2"); ws.mergeCells("A3:D3");
+    ws.getCell("A1").value = "CLOUDSTAFF";
+    ws.getCell("A1").font = { name: "Calibri", size: 18, bold: true, color: { argb: BRAND } };
+    ws.getCell("A2").value = name;
+    ws.getCell("A2").font = { name: "Calibri", size: 13, bold: true, color: { argb: DARK } };
+    ws.getCell("A3").value = `RFP question & answer record · exported ${new Date().toISOString().slice(0, 10)} · ${rows.length} questions`;
+    ws.getCell("A3").font = { name: "Calibri", size: 10, color: { argb: "FF6B7A8C" } };
+    const head = ws.getRow(4);
+    ["#", "RFP question", "Cloudstaff answer", "KB ref"].forEach((h, i) => {
+      const c = head.getCell(i + 1);
+      c.value = h;
+      c.font = { name: "Calibri", bold: true, color: { argb: "FFFFFFFF" } };
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BRAND } };
+      c.alignment = { vertical: "middle" };
+    });
+    rows.forEach((r, i) => {
+      const row = ws.addRow([i + 1, r.original_question || "", r.original_answer || "", r.question_id || ""]);
+      row.alignment = { vertical: "top", wrapText: true };
+      if (i % 2 === 1) [1, 2, 3, 4].forEach(ci => { row.getCell(ci).fill = { type: "pattern", pattern: "solid", fgColor: { argb: LIGHT } }; });
+    });
+    const buf = await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buf], { type: "application/octet-stream" }), `${name} — Cloudstaff RFP history.xlsx`);
+    toast(`Exported ${rows.length} Q&As`);
+  }
+
+  /* ========================================================================
+     LIBRARY — supporting videos, docs, certifications, images (v0.8.0)
+     ======================================================================== */
+  const LIB_SECTIONS = ["General Videos", "Testimonial Videos", "Testimonial Docs", "Brochures", "Certifications", "Support Images"];
+  const LIB_ICON = {
+    "General Videos": "fa-circle-play", "Testimonial Videos": "fa-circle-play",
+    "Testimonial Docs": "fa-file-lines", "Brochures": "fa-book-open",
+    "Certifications": "fa-certificate", "Support Images": "fa-image"
+  };
+
+  async function renderLibrary() {
+    const { data } = await state.sb.from("resources").select("*").order("id");
+    state.resources = data || [];
+    const wrap = $("#library-sections"); wrap.innerHTML = "";
+    LIB_SECTIONS.forEach(sec => {
+      const items = state.resources.filter(r => (r.section || "Certifications") === sec);
+      const block = el("div", "stack-sm");
+      const head = el("div", "cluster", `<h3>${esc(sec)} <span class="badge badge-neutral badge-sm">${items.length}</span></h3>`);
+      head.style.justifyContent = "space-between";
+      if (isEditor()) {
+        const add = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-plus"></i> Add');
+        add.addEventListener("click", () => openResModal(sec));
+        head.appendChild(add);
+      }
+      block.appendChild(head);
+      if (!items.length) {
+        block.appendChild(el("p", "text-secondary text-sm", "Nothing here yet."));
+      } else {
+        const grid = el("div", "rfp-lib-grid");
+        items.forEach(r => grid.appendChild(libCard(r, sec)));
+        block.appendChild(grid);
+      }
+      wrap.appendChild(block);
+    });
+  }
+
+  function libCard(r, sec) {
+    const card = el("div", "card rfp-lib-card stack-2xs");
+    const isImage = sec === "Support Images" && r.file_ref;
+    card.innerHTML =
+      (isImage ? `<div class="rfp-lib-thumb" data-thumb><span class="spinner spinner--sm"></span></div>`
+               : `<div class="rfp-lib-icon"><i class="fa-solid ${LIB_ICON[sec] || "fa-paperclip"}"></i></div>`) +
+      `<strong class="text-sm">${esc(r.name)}</strong>` +
+      (r.summary ? `<span class="text-secondary text-xs">${esc(r.summary.slice(0, 100))}</span>` : "") +
+      `<div class="cluster cluster-sm rfp-lib-actions"></div>`;
+    const actions = $(".rfp-lib-actions", card);
+    if (r.url) {
+      const open = el("a", "button button-secondary button-sm", '<i class="fa-solid fa-arrow-up-right-from-square"></i> Open');
+      open.href = r.url; open.target = "_blank"; open.rel = "noopener";
+      actions.appendChild(open);
+    }
+    if (r.file_ref) {
+      const dl = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-download"></i> Download');
+      dl.addEventListener("click", async () => {
+        const { data, error } = await state.sb.storage.from("library").createSignedUrl(r.file_ref, 3600);
+        if (error) return toast(error.message, "danger");
+        const a = el("a"); a.href = data.signedUrl; a.target = "_blank"; a.rel = "noopener";
+        document.body.appendChild(a); a.click(); a.remove();
+      });
+      actions.appendChild(dl);
+    }
+    if (isEditor()) {
+      const del = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-trash"></i>');
+      del.title = "Remove from library";
+      del.addEventListener("click", async () => {
+        if (!confirm(`Remove "${r.name}" from the library?`)) return;
+        if (r.file_ref) await state.sb.storage.from("library").remove([r.file_ref]);
+        const { error } = await state.sb.from("resources").delete().eq("id", r.id);
+        if (error) return toast(error.message, "danger");
+        toast(`${r.name} removed`);
+        renderLibrary();
+      });
+      actions.appendChild(del);
+    }
+    if (isImage) {
+      state.sb.storage.from("library").createSignedUrl(r.file_ref, 3600).then(({ data }) => {
+        const t = $("[data-thumb]", card);
+        if (t && data) t.innerHTML = `<img src="${esc(data.signedUrl)}" alt="${esc(r.name)}" loading="lazy">`;
+      });
+    }
+    return card;
+  }
+
+  function nextResId() {
+    let max = 0;
+    state.resources.forEach(r => { const m = /^RES-(\d+)$/.exec(r.id); if (m) max = Math.max(max, parseInt(m[1], 10)); });
+    return `RES-${String(max + 1).padStart(2, "0")}`;
+  }
+
+  function openResModal(section) {
+    if (!isEditor()) return;
+    state.resSection = section;
+    const sel = $("#res-section"); sel.innerHTML = "";
+    LIB_SECTIONS.forEach(s => sel.appendChild(new Option(s, s)));
+    sel.value = section;
+    $("#res-name").value = ""; $("#res-summary").value = ""; $("#res-url").value = ""; $("#res-file").value = "";
+    $("#res-error").hidden = true;
+    openOverlay("#res-overlay");
+  }
+  function closeResModal() { $("#res-overlay").hidden = true; document.body.style.overflow = ""; }
+
+  async function saveResource() {
+    const err = $("#res-error"); err.hidden = true;
+    const section = $("#res-section").value;
+    const name = $("#res-name").value.trim();
+    const summary = $("#res-summary").value.trim() || null;
+    const url = $("#res-url").value.trim() || null;
+    const file = $("#res-file").files[0] || null;
+    if (!name) { err.textContent = "Give it a name."; err.hidden = false; return; }
+    if (!url && !file) { err.textContent = "Provide a link or upload a file."; err.hidden = false; return; }
+    if (url && file) { err.textContent = "Link or file — not both."; err.hidden = false; return; }
+    const btn = $("#res-save"); btn.classList.add("is-loading"); btn.disabled = true;
+    let fileRef = null;
+    if (file) {
+      fileRef = `${section.toLowerCase().replace(/\s+/g, "-")}/${Date.now()}_${file.name.replace(/[^\w.\- ]+/g, "_")}`;
+      const up = await state.sb.storage.from("library").upload(fileRef, file, { upsert: true });
+      if (up.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = up.error.message; err.hidden = false; return; }
+    }
+    const { error } = await state.sb.from("resources").insert({
+      id: nextResId(), name, type: section, summary, section, url, file_ref: fileRef, supports: null
+    });
+    btn.classList.remove("is-loading"); btn.disabled = false;
+    if (error) { err.textContent = error.message; err.hidden = false; return; }
+    closeResModal();
+    toast(`Added to ${section}`);
+    renderLibrary();
   }
 
   /* ========================================================================

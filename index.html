@@ -112,6 +112,14 @@
           <i class="fa-solid fa-folder-open fa-fw"></i>
           <span class="app-sidebar-label">RFP Responses</span>
         </a>
+        <a href="#/history" data-nav="history">
+          <i class="fa-solid fa-clock-rotate-left fa-fw"></i>
+          <span class="app-sidebar-label">RFP History</span>
+        </a>
+        <a href="#/library" data-nav="library">
+          <i class="fa-solid fa-photo-film fa-fw"></i>
+          <span class="app-sidebar-label">Library</span>
+        </a>
         <a href="#/board" data-nav="board">
           <i class="fa-solid fa-users-line fa-fw"></i>
           <span class="app-sidebar-label">Team Board</span>
@@ -456,6 +464,65 @@
             </div>
           </section>
 
+          <!-- ---------- RFP HISTORY ---------- -->
+          <section id="history-view" class="stack-lg" hidden>
+            <div id="history-list-wrap" class="stack-lg">
+              <header class="rfp-page-head">
+                <div class="stack-2xs">
+                  <h1>RFP History</h1>
+                  <p class="text-secondary" id="history-summary">Every RFP the builder knows about — historical sources and finalised responses.</p>
+                </div>
+              </header>
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>RFP</th>
+                      <th style="width:11rem">Kind</th>
+                      <th style="width:8rem" class="text-center">Questions</th>
+                      <th style="width:16rem" class="text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="history-rows"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="history-detail-wrap" class="stack-lg" hidden>
+              <header class="rfp-page-head">
+                <div class="stack-2xs">
+                  <button class="button button-tertiary button-sm" id="history-back" style="align-self:flex-start"><i class="fa-solid fa-arrow-left"></i> All history</button>
+                  <h1 id="history-detail-name">—</h1>
+                  <p class="text-secondary text-sm" id="history-detail-sub">—</p>
+                </div>
+                <button class="button button-primary" id="history-export"><i class="fa-solid fa-file-excel"></i> Download Excel</button>
+              </header>
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table rfp-import-table">
+                  <thead>
+                    <tr>
+                      <th style="width:3rem">#</th>
+                      <th style="width:40%">Question</th>
+                      <th>Answer given</th>
+                      <th style="width:7rem">KB ref</th>
+                    </tr>
+                  </thead>
+                  <tbody id="history-detail-rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- ---------- LIBRARY ---------- -->
+          <section id="library-view" class="stack-lg" hidden>
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>Library</h1>
+                <p class="text-secondary">Videos, documents, certifications and images to support RFP responses.</p>
+              </div>
+            </header>
+            <div id="library-sections" class="stack-xl"><!-- filled by JS --></div>
+          </section>
+
           <!-- ---------- TEAM BOARD (everyone sees who is holding things up) ---------- -->
           <section id="board-view" class="stack-lg" hidden>
             <header class="rfp-page-head">
@@ -653,6 +720,47 @@
     </div>
   </div>
 
+  <!-- ===================== ADD LIBRARY RESOURCE MODAL ===================== -->
+  <div class="rfp-overlay" id="res-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-res-close></div>
+    <div class="modal modal-md rfp-modal" role="dialog" aria-label="Add library item">
+      <header class="modal-header">
+        <h3>Add to the Library</h3>
+        <button class="modal-close" data-res-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md">
+        <div class="cluster cluster-sm">
+          <div class="field flex-1">
+            <label class="field-label" for="res-section">Section</label>
+            <select class="select" id="res-section"></select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="res-name">Name</label>
+          <input class="input" id="res-name" placeholder="e.g. Cloudstaff Company Overview 2026">
+        </div>
+        <div class="field">
+          <label class="field-label" for="res-summary">Summary (optional)</label>
+          <input class="input" id="res-summary" placeholder="One line on what it is / when to use it.">
+        </div>
+        <div class="field">
+          <label class="field-label" for="res-url">Link URL (for videos or externally hosted items)</label>
+          <input class="input" id="res-url" placeholder="https://…">
+        </div>
+        <div class="field">
+          <label class="field-label" for="res-file">Or upload a file</label>
+          <input class="input" type="file" id="res-file">
+          <p class="field-hint text-secondary text-sm">Stored privately; the app serves it with short-lived links. Provide a link OR a file, not both.</p>
+        </div>
+        <div id="res-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-res-close>Cancel</button>
+        <button class="button button-primary" id="res-save"><i class="fa-solid fa-plus"></i> Add item</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- ===================== TOASTS ===================== -->
   <div class="toast-stack" id="toast-stack"></div>
 
@@ -660,6 +768,8 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- SheetJS (spreadsheet parse + export for the New RFP workflow) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- ExcelJS (styled Cloudstaff-formatted exports for RFP History) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/match.js"></script>
   <script src="js/app.js" defer></script>
