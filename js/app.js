@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.11.3";
+  const APP_VERSION = "v0.11.4";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -697,7 +697,6 @@
     $$("[data-resdel-close]").forEach(b => b.addEventListener("click", closeResDeleteModal));
     $("#user-add-btn").addEventListener("click", () => openUserModal(null));
     $$("[data-user-close]").forEach(b => b.addEventListener("click", closeUserModal));
-    $("#user-save").addEventListener("click", saveUser);
     $$("[data-userdel-close]").forEach(b => b.addEventListener("click", closeUserDeleteModal));
     $("#userdel-transfer").addEventListener("click", transferUserOwnership);
     $("#userdel-confirm").addEventListener("click", confirmUserDelete);
