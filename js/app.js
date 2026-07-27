@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.11.4";
+  const APP_VERSION = "v0.11.5";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -1880,11 +1880,11 @@
     $("#user-save").innerHTML = profile ? '<i class="fa-solid fa-floppy-disk"></i> Save changes' : '<i class="fa-solid fa-user-plus"></i> Create user';
     $("#user-email").value = profile ? (profile.email || "") : "";
     $("#user-email").disabled = !!profile;
-    $("#user-name").value = profile ? (profile.full_name || "") : "";
+    $("#user-fullname").value = profile ? (profile.full_name || "") : "";
     $("#user-pw-field").hidden = !!profile;
     if (!profile) $("#user-pw").value = tempPassword();
-    $("#user-role").value = profile ? profile.role : "viewer";
-    $("#user-role").disabled = !!profile && profile.user_id === state.user.id;
+    $("#user-newrole").value = profile ? profile.role : "viewer";
+    $("#user-newrole").disabled = !!profile && profile.user_id === state.user.id;
     $("#user-error").hidden = true;
     const save = $("#user-save");
     save.disabled = false; save.classList.remove("is-loading");
@@ -1899,8 +1899,8 @@
     const editing = state.userEditing;
     try {
       const email = $("#user-email").value.trim().toLowerCase();
-      const name = $("#user-name").value.trim();
-      const role = $("#user-role").value;
+      const name = $("#user-fullname").value.trim();
+      const role = $("#user-newrole").value;
       if (!name) throw new Error("Enter the user's full name.");
       btn.classList.add("is-loading"); btn.disabled = true;
       if (editing) {
