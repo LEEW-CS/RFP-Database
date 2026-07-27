@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.10.0";
+  const APP_VERSION = "v0.11.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -68,7 +68,9 @@
     currentHistory: null, currentHistoryRows: [],   // RFP History detail
     resSection: null,   // section being added to in the Library modal
     resEditing: null,   // resource open in the edit modal (null = adding new)
-    resDeleting: null, resDeleteBound: []   // admin delete-asset modal
+    resDeleting: null, resDeleteBound: [],  // admin delete-asset modal
+    userEditing: null,                       // profile open in the user modal (null = adding)
+    userDeleting: null, userOwned: null      // admin delete-user modal
   };
 
   const isAdmin = () => (state.profile && state.profile.role === "admin");
@@ -693,6 +695,12 @@
     $$("[data-res-close]").forEach(b => b.addEventListener("click", closeResModal));
     $("#res-save").addEventListener("click", saveResource);
     $$("[data-resdel-close]").forEach(b => b.addEventListener("click", closeResDeleteModal));
+    $("#user-add-btn").addEventListener("click", () => openUserModal(null));
+    $$("[data-user-close]").forEach(b => b.addEventListener("click", closeUserModal));
+    $("#user-save").addEventListener("click", saveUser);
+    $$("[data-userdel-close]").forEach(b => b.addEventListener("click", closeUserDeleteModal));
+    $("#userdel-transfer").addEventListener("click", transferUserOwnership);
+    $("#userdel-confirm").addEventListener("click", confirmUserDelete);
     $("#resdel-transfer").addEventListener("click", transferAssetBindings);
     $("#resdel-confirm").addEventListener("click", confirmAssetDelete);
     $("#rfp-finalise").addEventListener("click", finaliseRfp);
@@ -1775,19 +1783,25 @@
     state.profilesAll.slice().sort((a, b) => (a.full_name || a.email || "").localeCompare(b.full_name || b.email || "")).forEach(p => {
       const ownedCats = state.drisAll.filter(d => d.user_id === p.user_id)
         .map(d => (state.categories.find(c => c.id === d.category_id) || {}).code).filter(Boolean);
+      const ownedAssets = state.resources.filter(r => r.dri_user_id === p.user_id).length;
       const self = p.user_id === state.user.id;
       const tr = el("tr");
       tr.innerHTML =
         `<td><strong>${esc(p.full_name || "—")}</strong>${self ? ' <span class="text-secondary text-sm">(you)</span>' : ""}</td>` +
         `<td class="text-sm text-secondary">${esc(p.email || "")}</td>` +
         `<td></td>` +
-        `<td class="text-sm">${ownedCats.length ? esc(ownedCats.join(", ")) : '<span class="text-secondary">—</span>'}</td>`;
+        `<td class="text-sm">${ownedCats.length ? esc(ownedCats.join(", ")) : ""}${ownedAssets ? `${ownedCats.length ? " · " : ""}${ownedAssets} asset${ownedAssets === 1 ? "" : "s"}` : ""}${!ownedCats.length && !ownedAssets ? '<span class="text-secondary">—</span>' : ""}</td>` +
+        `<td class="text-right"></td>`;
       const sel = el("select", "select select-sm");
       roleOpts.forEach(r => sel.appendChild(new Option(r.replace(/^\w/, ch => ch.toUpperCase()), r)));
       sel.value = p.role;
       sel.disabled = self;   // can't demote yourself by accident
       if (self) sel.title = "You can't change your own role.";
       sel.addEventListener("change", async () => {
+        if (sel.value === "viewer" && await userOwnsAnything(p.user_id)) {
+          sel.value = p.role;
+          return toast(`${p.full_name || p.email} still owns categories, assets or RFP answers — transfer them first (use Delete's transfer tool or reassign below).`, "danger");
+        }
         const { error } = await state.sb.from("profiles").update({ role: sel.value }).eq("user_id", p.user_id);
         if (error) { sel.value = p.role; return toast(error.message, "danger"); }
         p.role = sel.value;
@@ -1795,10 +1809,22 @@
         renderAdmin();
       });
       tr.children[2].appendChild(sel);
+      const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
+      const edit = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-pen"></i>');
+      edit.title = "Edit name / role";
+      edit.addEventListener("click", () => openUserModal(p));
+      actions.appendChild(edit);
+      if (!self) {
+        const del = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-user-xmark"></i>');
+        del.title = "Delete user";
+        del.addEventListener("click", () => openUserDeleteModal(p));
+        actions.appendChild(del);
+      }
+      tr.lastChild.appendChild(actions);
       utb.appendChild(tr);
     });
 
-    const dtb = $("#admin-dri-rows"); dtb.innerHTML = "";
+        const dtb = $("#admin-dri-rows"); dtb.innerHTML = "";
     state.categories.forEach(c => {
       const qCount = state.questions.filter(q => q.category === c.name).length;
       const current = primaryDriForCategoryId(c.id);
@@ -1827,5 +1853,157 @@
       tr.children[2].appendChild(sel);
       dtb.appendChild(tr);
     });
+  }
+
+  /* ========================================================================
+     ADMIN — user CRUD (v0.11.0; create/delete via SECURITY DEFINER RPCs)
+     ======================================================================== */
+  async function userOwnsAnything(uid) {
+    if (state.drisAll.some(d => d.user_id === uid)) return true;
+    if (state.resources.some(r => r.dri_user_id === uid)) return true;
+    const { count } = await state.sb.from("rfp_rows").select("id", { count: "exact", head: true })
+      .eq("assigned_to", uid).eq("status", "pending");
+    return (count || 0) > 0;
+  }
+
+  function tempPassword() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+    let pw = "";
+    const rand = new Uint32Array(10); crypto.getRandomValues(rand);
+    for (let i = 0; i < 10; i++) pw += chars[rand[i] % chars.length];
+    return "Cs!" + pw;
+  }
+
+  function openUserModal(profile) {
+    if (!isAdmin()) return;
+    state.userEditing = profile || null;
+    $("#user-modal-title").textContent = profile ? `Edit ${profile.full_name || profile.email}` : "Add user";
+    $("#user-save").innerHTML = profile ? '<i class="fa-solid fa-floppy-disk"></i> Save changes' : '<i class="fa-solid fa-user-plus"></i> Create user';
+    $("#user-email").value = profile ? (profile.email || "") : "";
+    $("#user-email").disabled = !!profile;
+    $("#user-name").value = profile ? (profile.full_name || "") : "";
+    $("#user-pw-field").hidden = !!profile;
+    if (!profile) $("#user-pw").value = tempPassword();
+    $("#user-role").value = profile ? profile.role : "viewer";
+    $("#user-role").disabled = !!profile && profile.user_id === state.user.id;
+    $("#user-error").hidden = true;
+    openOverlay("#user-overlay");
+  }
+  function closeUserModal() { $("#user-overlay").hidden = true; document.body.style.overflow = ""; state.userEditing = null; }
+
+  async function saveUser() {
+    const err = $("#user-error"); err.hidden = true;
+    const editing = state.userEditing;
+    const email = $("#user-email").value.trim().toLowerCase();
+    const name = $("#user-name").value.trim();
+    const role = $("#user-role").value;
+    if (!name) { err.textContent = "Enter the user's full name."; err.hidden = false; return; }
+    const btn = $("#user-save"); btn.classList.add("is-loading"); btn.disabled = true;
+    try {
+      if (editing) {
+        if (role === "viewer" && editing.role !== "viewer" && await userOwnsAnything(editing.user_id)) {
+          throw new Error("They still own categories, assets or RFP answers — transfer those first.");
+        }
+        const { error } = await state.sb.from("profiles").update({ full_name: name, role }).eq("user_id", editing.user_id);
+        if (error) throw new Error(error.message);
+        editing.full_name = name; editing.role = role;
+        toast("User updated");
+      } else {
+        if (!email) throw new Error("Enter an email address.");
+        const pw = $("#user-pw").value;
+        const { data: uid, error } = await state.sb.rpc("admin_create_user", { p_email: email, p_name: name, p_password: pw });
+        if (error) throw new Error(error.message);
+        if (role !== "viewer") await state.sb.from("profiles").update({ role }).eq("user_id", uid);
+        toast(`${name} created — give them the temporary password`);
+      }
+      const { data } = await state.sb.from("profiles").select("user_id,email,full_name,role");
+      state.profilesAll = data || state.profilesAll;
+      closeUserModal();
+      renderAdmin();
+    } catch (e) {
+      err.textContent = e.message || String(e); err.hidden = false;
+    }
+    btn.classList.remove("is-loading"); btn.disabled = false;
+  }
+
+  async function openUserDeleteModal(p) {
+    if (!isAdmin() || p.user_id === state.user.id) return;
+    state.userDeleting = p;
+    $("#userdel-name").textContent = `${p.full_name || p.email} (${p.email}) — ${p.role}`;
+    $("#userdel-error").hidden = true;
+    const cats = state.drisAll.filter(d => d.user_id === p.user_id)
+      .map(d => state.categories.find(c => c.id === d.category_id)).filter(Boolean);
+    const assets = state.resources.filter(r => r.dri_user_id === p.user_id);
+    const { data: pendRows } = await state.sb.from("rfp_rows")
+      .select("id,question,rfps(name,status)").eq("assigned_to", p.user_id).eq("status", "pending");
+    const pend = (pendRows || []).filter(r => !r.rfps || r.rfps.status !== "finalised");
+    state.userOwned = { cats, assets, pend };
+    const total = cats.length + assets.length + pend.length;
+    $("#userdel-owned-wrap").hidden = total === 0;
+    $("#userdel-none").hidden = total > 0;
+    $("#userdel-confirm").disabled = total > 0;
+    if (total) {
+      $("#userdel-owned-count").textContent =
+        `${p.full_name || p.email} owns ${cats.length} categor${cats.length === 1 ? "y" : "ies"}, ${assets.length} asset${assets.length === 1 ? "" : "s"} and ${pend.length} pending RFP answer${pend.length === 1 ? "" : "s"}.`;
+      $("#userdel-owned-list").innerHTML =
+        cats.map(c => `<div class="rfp-board-item"><span class="badge badge-brand badge-sm">Category</span><span class="text-sm rfp-board-q">${esc(c.name)}</span></div>`).join("") +
+        assets.map(r => `<div class="rfp-board-item"><span class="badge badge-neutral badge-sm">Asset</span><code class="text-xs">${esc(r.id)}</code><span class="text-sm rfp-board-q">${esc(r.name)}</span></div>`).join("") +
+        pend.map(r => `<div class="rfp-board-item"><span class="badge badge-warning badge-sm">RFP answer</span><span class="text-sm rfp-board-q">${esc((r.rfps ? r.rfps.name + " — " : "") + r.question.slice(0, 100))}</span></div>`).join("");
+      const tsel = $("#userdel-transfer-target"); tsel.innerHTML = "";
+      tsel.appendChild(new Option("— Transfer everything to… —", ""));
+      editorProfiles().filter(x => x.user_id !== p.user_id)
+        .forEach(x => tsel.appendChild(new Option(`${x.full_name || x.email} (${x.role})`, x.user_id)));
+    }
+    openOverlay("#userdel-overlay");
+  }
+  function closeUserDeleteModal() { $("#userdel-overlay").hidden = true; document.body.style.overflow = ""; state.userDeleting = null; state.userOwned = null; }
+
+  async function transferUserOwnership() {
+    const p = state.userDeleting, owned = state.userOwned; if (!p || !owned) return;
+    const err = $("#userdel-error"); err.hidden = true;
+    const target = $("#userdel-transfer-target").value;
+    if (!target) { err.textContent = "Pick the Editor or Admin to transfer everything to."; err.hidden = false; return; }
+    try {
+      for (const c of owned.cats) {
+        let r = await state.sb.from("category_dris").delete().eq("category_id", c.id).eq("user_id", p.user_id);
+        if (r.error) throw new Error(r.error.message);
+        r = await state.sb.from("category_dris").upsert({ category_id: c.id, user_id: target, is_primary: true }, { onConflict: "category_id,user_id" });
+        if (r.error) throw new Error(r.error.message);
+      }
+      if (owned.assets.length) {
+        const r = await state.sb.from("resources").update({ dri_user_id: target }).eq("dri_user_id", p.user_id);
+        if (r.error) throw new Error(r.error.message);
+      }
+      if (owned.pend.length) {
+        const r = await state.sb.from("rfp_rows").update({ assigned_to: target }).eq("assigned_to", p.user_id).eq("status", "pending");
+        if (r.error) throw new Error(r.error.message);
+      }
+      // refresh local state
+      const [dris, res] = await Promise.all([
+        state.sb.from("category_dris").select("category_id,user_id,is_primary"),
+        state.sb.from("resources").select("*")
+      ]);
+      state.drisAll = dris.data || state.drisAll;
+      state.resources = res.data || state.resources;
+      state.myCategoryIds = new Set(state.drisAll.filter(d => d.user_id === state.user.id).map(d => d.category_id));
+      toast(`Everything transferred to ${nameOf(target)}`);
+      openUserDeleteModal(p);   // refresh: should now show "owns nothing"
+    } catch (e) {
+      err.textContent = e.message || String(e); err.hidden = false;
+    }
+  }
+
+  async function confirmUserDelete() {
+    const p = state.userDeleting; if (!p) return;
+    const err = $("#userdel-error"); err.hidden = true;
+    const btn = $("#userdel-confirm"); btn.classList.add("is-loading"); btn.disabled = true;
+    const { error } = await state.sb.rpc("admin_delete_user", { p_uid: p.user_id });
+    btn.classList.remove("is-loading");
+    if (error) { btn.disabled = false; err.textContent = error.message; err.hidden = false; return; }
+    const { data } = await state.sb.from("profiles").select("user_id,email,full_name,role");
+    state.profilesAll = data || state.profilesAll.filter(x => x.user_id !== p.user_id);
+    closeUserDeleteModal();
+    toast(`${p.full_name || p.email} deleted`);
+    renderAdmin();
   }
 })();

@@ -544,21 +544,25 @@
             <div class="alert alert-info">
               <i class="alert-icon fa-solid fa-circle-info"></i>
               <div>
-                <strong>Adding a new user:</strong>
-                <span>create the login in the Supabase dashboard (Authentication → Users → Add user, tick "Auto Confirm"). They appear here automatically as a Viewer — then set their role and categories below. Requires the auto-provision trigger from <code>13_user_autoprovision.sql</code>.</span>
+                <strong>Roles:</strong>
+                <span>categories, questions and assets can only be assigned to <strong>Editors</strong> and <strong>Admins</strong> — Viewers have read-only access, so nothing can be given to them, and a user can't be demoted to Viewer while they still own anything (transfer first).</span>
               </div>
             </div>
 
             <div class="stack-sm">
-              <h3>Users</h3>
+              <div class="cluster" style="justify-content:space-between">
+                <h3>Users</h3>
+                <button class="button button-primary button-sm" id="user-add-btn"><i class="fa-solid fa-user-plus"></i> Add user</button>
+              </div>
               <div class="table-wrap rfp-table-wrap">
                 <table class="table">
                   <thead>
                     <tr>
                       <th>Name</th>
-                      <th style="width:20rem">Email</th>
-                      <th style="width:10rem">Role</th>
-                      <th style="width:12rem">Categories owned</th>
+                      <th style="width:18rem">Email</th>
+                      <th style="width:9rem">Role</th>
+                      <th style="width:11rem">Owns</th>
+                      <th style="width:9rem" class="text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody id="admin-user-rows"></tbody>
@@ -790,6 +794,81 @@
       <footer class="modal-footer">
         <button class="button button-tertiary" data-resdel-close>Cancel</button>
         <button class="button button-danger" id="resdel-confirm"><i class="fa-solid fa-trash"></i> Delete asset</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ===================== ADD / EDIT USER MODAL (admin) ===================== -->
+  <div class="rfp-overlay" id="user-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-user-close></div>
+    <div class="modal modal-md rfp-modal" role="dialog" aria-label="User">
+      <header class="modal-header">
+        <h3 id="user-modal-title">Add user</h3>
+        <button class="modal-close" data-user-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md">
+        <div class="field">
+          <label class="field-label" for="user-email">Email</label>
+          <input class="input" id="user-email" type="email" placeholder="name@cloudstaff.com">
+        </div>
+        <div class="field">
+          <label class="field-label" for="user-name">Full name</label>
+          <input class="input" id="user-name" placeholder="e.g. Jane Reyes">
+        </div>
+        <div class="field" id="user-pw-field">
+          <label class="field-label" for="user-pw">Temporary password</label>
+          <input class="input" id="user-pw">
+          <p class="field-hint text-secondary text-sm">Give this to the user; they should change it after first login.</p>
+        </div>
+        <div class="field">
+          <label class="field-label" for="user-role">Role</label>
+          <select class="select" id="user-role">
+            <option value="viewer">Viewer — read-only</option>
+            <option value="editor">Editor — can own categories, questions & assets</option>
+            <option value="admin">Admin — everything</option>
+          </select>
+        </div>
+        <div id="user-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-user-close>Cancel</button>
+        <button class="button button-primary" id="user-save"><i class="fa-solid fa-user-plus"></i> Create user</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ===================== DELETE USER MODAL (admin) ===================== -->
+  <div class="rfp-overlay" id="userdel-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-userdel-close></div>
+    <div class="modal modal-md rfp-modal" role="dialog" aria-label="Delete user">
+      <header class="modal-header">
+        <h3>Delete user</h3>
+        <button class="modal-close" data-userdel-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md">
+        <p><strong id="userdel-name">—</strong></p>
+        <div id="userdel-owned-wrap" class="stack-sm">
+          <div class="alert alert-warning">
+            <i class="alert-icon fa-solid fa-boxes-packing"></i>
+            <div>
+              <strong id="userdel-owned-count">—</strong>
+              <span>Transfer everything to another Editor or Admin below before deleting, so nothing is orphaned.</span>
+            </div>
+          </div>
+          <div id="userdel-owned-list" class="rfp-board-items"></div>
+          <div class="cluster cluster-sm">
+            <select class="select select-sm flex-1" id="userdel-transfer-target"></select>
+            <button class="button button-secondary button-sm" id="userdel-transfer"><i class="fa-solid fa-right-left"></i> Transfer everything</button>
+          </div>
+        </div>
+        <div id="userdel-none" class="alert alert-success banner-inline" hidden>
+          <i class="alert-icon fa-solid fa-circle-check"></i><span>This user owns nothing — safe to delete.</span>
+        </div>
+        <div id="userdel-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-userdel-close>Cancel</button>
+        <button class="button button-danger" id="userdel-confirm" disabled><i class="fa-solid fa-user-xmark"></i> Delete user</button>
       </footer>
     </div>
   </div>
