@@ -17,12 +17,41 @@
 </head>
 <body class="application">
 
+  <!-- Cloudstaff logo sprite (from Design System; themable via --logo-* vars in app.css) -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="sym-logo-landscape" viewBox="0 0 350 115">
+      <g id="Ring">
+          <path class="logo-ring-outer" d="M53.51,109.56C24.66,109.56,1.19,86.09,1.19,57.24S24.66,4.93,53.51,4.93s52.31,23.47,52.31,52.31-23.47,52.31-52.31,52.31ZM53.51,11.93c-24.99,0-45.31,20.33-45.31,45.31s20.33,45.31,45.31,45.31,45.31-20.33,45.31-45.31S78.49,11.93,53.51,11.93Z" fill="var(--logo-ring-stroke)"/>
+        </g>
+        <g id="Emblem_Base" data-name="Emblem Base">
+          <circle class="logo-base" cx="53.51" cy="57.24" r="46.31" transform="translate(-11.72 13.82) rotate(-13.28)" fill="var(--logo-emblem-fill)"/>
+        </g>
+        <g id="Cloud">
+          <path class="logo-cloud" d="M35.66,70.65c9.5-.59,22.4-6.24,32.49-7.31,5.29-.56,9.89-.61,13.07-.54,1.06.02,1.83.05,2.23.08.02,0,.05,0,.07,0,1.8.11,1.7-1.06,1.7-1.06,0-.12,0-.24,0-.36,0-9.9-7.87-17.92-17.58-17.92-6.51,0-12.19,3.61-15.23,8.97-1.02-3.3-4.04-5.69-7.61-5.69-4.41,0-7.98,3.64-7.98,8.13,0,.13,0,.26,0,.39-.97-.25-1.99-.39-3.04-.39-5.82,0-10.7,4.11-12,9.64,0,0-.38,1,.28,1.82,1.95,2.7,7.77,4.6,13.57,4.24Z" fill="var(--logo-cloud-fill)"/>
+        </g>
+        <g id="Text_-_Horizontal" data-name="Text - Horizontal">
+          <g>
+            <path class="logo-text" d="M113.55,47.43c1.32-2.39,3.16-4.25,5.52-5.59,2.36-1.33,5.04-2,8.03-2,3.67,0,6.81.97,9.42,2.9,2.61,1.94,4.36,4.58,5.24,7.92h-8.27c-.62-1.29-1.49-2.27-2.62-2.95-1.13-.67-2.41-1.01-3.85-1.01-2.32,0-4.2.81-5.63,2.42-1.44,1.61-2.16,3.77-2.16,6.47s.72,4.85,2.16,6.47c1.44,1.61,3.31,2.42,5.63,2.42,1.44,0,2.72-.34,3.85-1.01,1.13-.67,2-1.66,2.62-2.95h8.27c-.88,3.34-2.63,5.98-5.24,7.9-2.61,1.92-5.75,2.88-9.42,2.88-2.99,0-5.67-.67-8.03-2-2.36-1.33-4.2-3.19-5.52-5.57-1.32-2.38-1.98-5.09-1.98-8.14s.66-5.77,1.98-8.16Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M151.25,38.52v32.56h-7.52v-32.56h7.52Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M159.64,69.89c-1.92-1.03-3.43-2.49-4.53-4.4-1.1-1.91-1.65-4.14-1.65-6.69s.56-4.74,1.67-6.67c1.11-1.92,2.64-3.4,4.58-4.42s4.11-1.54,6.51-1.54,4.58.51,6.51,1.54,3.46,2.5,4.58,4.42c1.11,1.92,1.67,4.14,1.67,6.67s-.56,4.75-1.69,6.67c-1.13,1.92-2.67,3.4-4.62,4.42-1.95,1.03-4.13,1.54-6.53,1.54s-4.57-.51-6.49-1.54ZM169.8,63.33c1.01-1.06,1.52-2.57,1.52-4.53s-.49-3.48-1.47-4.53c-.98-1.06-2.19-1.58-3.63-1.58s-2.68.52-3.65,1.56c-.97,1.04-1.45,2.56-1.45,4.55s.48,3.48,1.43,4.53c.95,1.06,2.15,1.58,3.59,1.58s2.66-.53,3.67-1.58Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M205.46,46.53v24.55h-7.52v-3.34c-.76,1.09-1.8,1.96-3.1,2.62-1.31.66-2.75.99-4.33.99-1.88,0-3.54-.42-4.97-1.25-1.44-.84-2.55-2.05-3.34-3.63s-1.19-3.45-1.19-5.59v-14.34h7.48v13.33c0,1.64.43,2.92,1.28,3.83.85.91,1.99,1.36,3.43,1.36s2.62-.45,3.48-1.36c.85-.91,1.28-2.18,1.28-3.83v-13.33h7.52Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M209.05,52.11c.95-1.91,2.25-3.37,3.89-4.4,1.64-1.03,3.48-1.54,5.5-1.54,1.61,0,3.09.34,4.42,1.01,1.33.68,2.38,1.58,3.15,2.73v-11.4h7.52v32.56h-7.52v-3.52c-.7,1.17-1.71,2.11-3.01,2.82-1.31.7-2.82,1.06-4.55,1.06-2.02,0-3.86-.52-5.5-1.56-1.64-1.04-2.94-2.52-3.89-4.44-.95-1.92-1.43-4.14-1.43-6.67s.48-4.74,1.43-6.64ZM224.45,54.36c-1.04-1.08-2.31-1.63-3.81-1.63s-2.77.54-3.81,1.61c-1.04,1.07-1.56,2.55-1.56,4.42s.52,3.37,1.56,4.47c1.04,1.1,2.31,1.65,3.81,1.65s2.76-.54,3.81-1.63c1.04-1.08,1.56-2.57,1.56-4.44s-.52-3.36-1.56-4.44Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M241.5,70.33c-1.67-.73-2.99-1.74-3.96-3.01-.97-1.28-1.51-2.71-1.63-4.29h7.44c.09.85.48,1.54,1.19,2.07.7.53,1.57.79,2.6.79.94,0,1.66-.18,2.18-.55.51-.37.77-.84.77-1.43,0-.7-.37-1.22-1.1-1.56-.73-.34-1.92-.71-3.56-1.12-1.76-.41-3.23-.84-4.4-1.3-1.17-.45-2.19-1.17-3.04-2.16-.85-.98-1.28-2.31-1.28-3.98,0-1.41.39-2.69,1.17-3.85.78-1.16,1.92-2.07,3.43-2.75,1.51-.67,3.31-1.01,5.39-1.01,3.08,0,5.51.76,7.28,2.29,1.77,1.53,2.79,3.55,3.06,6.07h-6.95c-.12-.85-.49-1.52-1.12-2.02-.63-.5-1.46-.75-2.49-.75-.88,0-1.55.17-2.02.51-.47.34-.7.8-.7,1.39,0,.7.37,1.23,1.12,1.58s1.91.7,3.5,1.06c1.82.47,3.3.93,4.44,1.39,1.14.46,2.15,1.19,3.01,2.2.87,1.01,1.31,2.37,1.34,4.07,0,1.44-.4,2.72-1.21,3.85-.81,1.13-1.97,2.02-3.48,2.66-1.51.65-3.26.97-5.26.97-2.14,0-4.05-.37-5.72-1.1Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M273.71,64.7v6.38h-3.83c-2.73,0-4.85-.67-6.38-2-1.53-1.33-2.29-3.51-2.29-6.53v-9.77h-2.99v-6.25h2.99v-5.98h7.52v5.98h4.93v6.25h-4.93v9.86c0,.73.18,1.26.53,1.58.35.32.94.48,1.76.48h2.68Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M276.06,52.11c.95-1.91,2.25-3.37,3.89-4.4,1.64-1.03,3.48-1.54,5.5-1.54,1.73,0,3.25.35,4.55,1.06,1.31.7,2.31,1.63,3.01,2.77v-3.48h7.52v24.55h-7.52v-3.48c-.73,1.14-1.75,2.07-3.06,2.77-1.31.7-2.82,1.06-4.55,1.06-2,0-3.81-.52-5.46-1.56-1.64-1.04-2.94-2.52-3.89-4.44-.95-1.92-1.43-4.14-1.43-6.67s.48-4.74,1.43-6.64ZM291.46,54.36c-1.04-1.08-2.31-1.63-3.81-1.63s-2.77.54-3.81,1.61c-1.04,1.07-1.56,2.55-1.56,4.42s.52,3.37,1.56,4.47c1.04,1.1,2.31,1.65,3.81,1.65s2.76-.54,3.81-1.63c1.04-1.08,1.56-2.57,1.56-4.44s-.52-3.36-1.56-4.44Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M316.56,52.77h-4.05v18.3h-7.52v-18.3h-2.73v-6.25h2.73v-.7c0-3.02.86-5.32,2.6-6.89,1.73-1.57,4.27-2.35,7.61-2.35.56,0,.97.02,1.23.04v6.38c-1.44-.09-2.45.12-3.04.62-.59.5-.88,1.39-.88,2.68v.22h4.05v6.25Z" fill="var(--logo-text-fill)"/>
+            <path class="logo-text" d="M330.64,52.77h-4.05v18.3h-7.52v-18.3h-2.73v-6.25h2.73v-.7c0-3.02.86-5.32,2.6-6.89,1.73-1.57,4.27-2.35,7.61-2.35.56,0,.97.02,1.23.04v6.38c-1.44-.09-2.45.12-3.04.62-.59.5-.88,1.39-.88,2.68v.22h4.05v6.25Z" fill="var(--logo-text-fill)"/>
+          </g>
+          <path class="logo-text" d="M336.96,62.08c.73.41,1.3.99,1.7,1.71.41.73.61,1.55.61,2.47s-.2,1.74-.61,2.47c-.41.73-.97,1.3-1.7,1.71-.73.41-1.55.62-2.47.62s-1.74-.21-2.47-.62c-.73-.41-1.3-.98-1.71-1.71-.41-.73-.62-1.55-.62-2.47s.21-1.74.62-2.47c.41-.73.98-1.3,1.71-1.71.73-.41,1.55-.62,2.47-.62s1.74.21,2.47.62ZM337.15,68.98c.67-.69,1-1.59,1-2.71s-.33-2.02-1-2.71-1.55-1.04-2.66-1.04-2.01.35-2.67,1.04c-.66.69-.99,1.6-.99,2.71s.33,2.02.99,2.71c.66.69,1.55,1.03,2.67,1.03s1.99-.34,2.66-1.03ZM336.35,66.23c-.17.25-.4.44-.69.56l1.22,1.89h-1.75l-1.01-1.72h-.16v1.72h-1.45v-4.94h2.32c.54,0,.97.15,1.29.45.32.3.48.69.48,1.16,0,.34-.08.63-.25.89ZM333.96,65.78h.78c.12,0,.23-.03.31-.1.08-.07.13-.16.13-.29s-.04-.21-.13-.28c-.08-.06-.19-.09-.31-.09h-.78v.76Z" fill="var(--logo-text-fill)"/>
+        </g>
+    </symbol>
+  </svg>
+
   <!-- ===================== LOGIN ===================== -->
   <section id="login-view" class="rfp-login" hidden>
     <div class="card rfp-login-card stack-lg">
       <div class="rfp-login-brand">
-        <img src="https://style.stage.cloud.cloudstaff.com/assets/logos/cloudstaff-logo-landscape.svg"
-             alt="Cloudstaff" height="40">
+        <svg class="brand-logo" width="122" height="40" viewBox="0 0 350 115" role="img" aria-label="Cloudstaff"><use href="#sym-logo-landscape"/></svg>
         <span class="brand-sub-label">RFP Builder</span>
       </div>
       <div class="stack-2xs">
@@ -59,8 +88,7 @@
     <aside class="app-sidebar" aria-label="Primary">
       <header class="app-sidebar-header">
         <a class="brand-lockup" href="#/browser">
-          <img src="https://style.stage.cloud.cloudstaff.com/assets/logos/cloudstaff-logo-landscape.svg"
-               alt="Cloudstaff" height="30">
+          <svg class="brand-logo" width="91" height="30" viewBox="0 0 350 115" role="img" aria-label="Cloudstaff"><use href="#sym-logo-landscape"/></svg>
         </a>
         <button class="app-sidebar-toggle" data-collapse aria-label="Collapse sidebar">
           <i class="fa-solid fa-chevron-left"></i>
@@ -83,6 +111,14 @@
         <a href="#/rfps" data-nav="rfps">
           <i class="fa-solid fa-folder-open fa-fw"></i>
           <span class="app-sidebar-label">RFP Responses</span>
+        </a>
+        <a href="#/board" data-nav="board">
+          <i class="fa-solid fa-users-line fa-fw"></i>
+          <span class="app-sidebar-label">Team Board</span>
+        </a>
+        <a href="#/admin" data-nav="admin" id="admin-nav" hidden>
+          <i class="fa-solid fa-user-gear fa-fw"></i>
+          <span class="app-sidebar-label">Users &amp; DRIs</span>
         </a>
       </nav>
       <footer class="app-sidebar-footer stack-sm">
@@ -420,6 +456,74 @@
             </div>
           </section>
 
+          <!-- ---------- TEAM BOARD (everyone sees who is holding things up) ---------- -->
+          <section id="board-view" class="stack-lg" hidden>
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>Team Board</h1>
+                <p class="text-secondary" id="board-summary">Every outstanding item, by owner. Visible to everyone signed in.</p>
+              </div>
+            </header>
+            <div id="board-clear" class="empty-state" hidden>
+              <span class="empty-state-icon"><i class="fa-solid fa-champagne-glasses"></i></span>
+              <h4>Nothing outstanding</h4>
+              <p>Every answer is written, reworked, confirmed and approved. Enjoy it while it lasts.</p>
+            </div>
+            <div id="board-list" class="stack-md"><!-- filled by JS --></div>
+          </section>
+
+          <!-- ---------- ADMIN: USERS & DRIS ---------- -->
+          <section id="admin-view" class="stack-lg" hidden>
+            <header class="rfp-page-head">
+              <div class="stack-2xs">
+                <h1>Users &amp; DRIs</h1>
+                <p class="text-secondary">Set roles and assign category ownership. Only admins see this page.</p>
+              </div>
+            </header>
+
+            <div class="alert alert-info">
+              <i class="alert-icon fa-solid fa-circle-info"></i>
+              <div>
+                <strong>Adding a new user:</strong>
+                <span>create the login in the Supabase dashboard (Authentication → Users → Add user, tick "Auto Confirm"). They appear here automatically as a Viewer — then set their role and categories below. Requires the auto-provision trigger from <code>13_user_autoprovision.sql</code>.</span>
+              </div>
+            </div>
+
+            <div class="stack-sm">
+              <h3>Users</h3>
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th style="width:20rem">Email</th>
+                      <th style="width:10rem">Role</th>
+                      <th style="width:12rem">Categories owned</th>
+                    </tr>
+                  </thead>
+                  <tbody id="admin-user-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="stack-sm">
+              <h3>Category DRIs</h3>
+              <p class="text-secondary text-sm">Who owns each category. Changing a DRI moves all of that category's questions (and their to-dos) to the new owner.</p>
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th style="width:8rem" class="text-center">Questions</th>
+                      <th style="width:16rem">DRI</th>
+                    </tr>
+                  </thead>
+                  <tbody id="admin-dri-rows"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
         </div>
       </div>
     </main>
@@ -494,8 +598,9 @@
       </header>
       <div class="modal-body stack-md">
         <div class="field">
-          <label class="field-label" for="create-name">Project name</label>
+          <label class="field-label" for="create-name">RFP name</label>
           <input class="input" id="create-name" placeholder="e.g. Sophos Contact Centre RFP">
+          <p class="field-hint text-secondary text-sm">Used wherever this RFP is referenced — including the provenance record kept against every answer it uses.</p>
         </div>
         <div id="create-auto-note" class="alert alert-success banner-inline">
           <i class="alert-icon fa-solid fa-bolt"></i><span></span>

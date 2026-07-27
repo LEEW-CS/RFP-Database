@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.6.0";
+  const APP_VERSION = "v0.7.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -133,7 +133,7 @@
       sb.from("category_dris").select("category_id,user_id,is_primary"),
       sb.from("resources").select("*"),
       sb.from("provenance").select("question_id").range(0, 5000),
-      sb.from("attestations").select("question_id,outcome,attested_at").eq("user_id", user.id).order("attested_at", { ascending: false })
+      sb.from("attestations").select("question_id,user_id,outcome,attested_at").order("attested_at", { ascending: false }).range(0, 5000)
     ]);
     state.categories = cats.data || [];
     state.profilesAll = profAll.data || [];
@@ -143,8 +143,12 @@
     state.resources = res.data || [];
     state.provCounts = {};
     (prov.data || []).forEach(r => { state.provCounts[r.question_id] = (state.provCounts[r.question_id] || 0) + 1; });
-    state.latestAttest = {};
-    (att.data || []).forEach(a => { if (!state.latestAttest[a.question_id]) state.latestAttest[a.question_id] = a; });
+    state.latestAttest = {};      // latest by ME (drives My To Do)
+    state.latestAttestAny = {};   // latest by ANYONE (drives the Team Board)
+    (att.data || []).forEach(a => {
+      if (a.user_id === user.id && !state.latestAttest[a.question_id]) state.latestAttest[a.question_id] = a;
+      if (!state.latestAttestAny[a.question_id]) state.latestAttestAny[a.question_id] = a;
+    });
     await Promise.all([loadQuestions(), loadRfpTodos()]);
     renderUserBox(); populateCategoryFilter(); populateNewQCats(); route();
   }
@@ -170,6 +174,7 @@
     const nav = $("#attest-nav-count");
     if (todo) { nav.textContent = todo; nav.hidden = false; } else nav.hidden = true;
     $("#new-q-btn").hidden = !isEditor();
+    $("#admin-nav").hidden = !isAdmin();
   }
 
   // What does this owned question still need? (lower rank = more urgent)
@@ -191,14 +196,20 @@
     if (hash.includes("attest")) view = "attest";
     else if (hash.includes("import")) view = "import";
     else if (hash.includes("rfps")) view = "rfps";
+    else if (hash.includes("board")) view = "board";
+    else if (hash.includes("admin")) view = isAdmin() ? "admin" : "browser";
     $("#browser-view").hidden = view !== "browser";
     $("#attest-view").hidden = view !== "attest";
     $("#import-view").hidden = view !== "import";
     $("#rfps-view").hidden = view !== "rfps";
+    $("#board-view").hidden = view !== "board";
+    $("#admin-view").hidden = view !== "admin";
     $$("[data-nav]").forEach(a => a.classList.toggle("is-active", a.dataset.nav === view));
     if (view === "browser") renderBrowser();
     else if (view === "attest") renderAttest();
     else if (view === "rfps") renderRfps();
+    else if (view === "board") renderBoard();
+    else if (view === "admin") renderAdmin();
     else renderImport();
   }
 
@@ -1159,5 +1170,149 @@
     if (dl.error) return toast(dl.error.message, "danger");
     const base = p.file_name.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
     downloadBlob(dl.data, `${base} — Cloudstaff responses.xlsx`);
+  }
+
+  /* ========================================================================
+     TEAM BOARD — everyone sees every outstanding item, by owner (v0.7.0)
+     ======================================================================== */
+  function confirmedThisMonthAny(q) {
+    const a = state.latestAttestAny[q.id];
+    return !!(a && a.outcome === "confirmed" && a.attested_at.slice(0, 7) === new Date().toISOString().slice(0, 7));
+  }
+  // Board classification mirrors todoFor() but uses *any* DRI's attestation.
+  function boardTodoFor(q) {
+    if (q.status === "approved-blank" || !q.answer) return "write";
+    if (q.needs_rework) return "rework";
+    if (!confirmedThisMonthAny(q)) return "confirm";
+    return null;
+  }
+  const BOARD_BADGE = {
+    write:   { cls: "badge-warning", label: "Write answer" },
+    rework:  { cls: "badge-info",    label: "Rework" },
+    confirm: { cls: "badge-neutral", label: "Confirm" },
+    rfp:     { cls: "badge-brand",   label: "RFP answer" }
+  };
+
+  async function renderBoard() {
+    const { data: pend } = await state.sb.from("rfp_rows")
+      .select("id,rfp_id,seq,question,band,assigned_to,rfps(name,status)")
+      .eq("status", "pending");
+    const pending = (pend || []).filter(r => !r.rfps || r.rfps.status !== "finalised");
+
+    const cards = editorProfiles().map(p => {
+      const catIds = new Set(state.drisAll.filter(d => d.user_id === p.user_id).map(d => d.category_id));
+      const items = [];
+      state.questions.forEach(q => {
+        if (!catIds.has(catIdByName(q.category))) return;
+        const kind = boardTodoFor(q);
+        if (kind) items.push({ kind, ref: q.id, text: q.question, q });
+      });
+      pending.filter(r => r.assigned_to === p.user_id).forEach(r =>
+        items.push({ kind: "rfp", ref: r.rfps ? r.rfps.name : "RFP", text: r.question, rfpId: r.rfp_id }));
+      const counts = { write: 0, rework: 0, confirm: 0, rfp: 0 };
+      items.forEach(i => counts[i.kind]++);
+      return { p, items, counts };
+    }).filter(c => c.items.length).sort((a, b) => b.items.length - a.items.length);
+
+    $("#board-clear").hidden = cards.length > 0;
+    const wrap = $("#board-list"); wrap.innerHTML = "";
+    const totalItems = cards.reduce((n, c) => n + c.items.length, 0);
+    $("#board-summary").textContent = cards.length
+      ? `${totalItems} outstanding item${totalItems === 1 ? "" : "s"} across ${cards.length} ${cards.length === 1 ? "person" : "people"} — most outstanding first. Visible to everyone signed in.`
+      : "Every outstanding item, by owner. Visible to everyone signed in.";
+
+    cards.forEach((c, idx) => {
+      const name = c.p.full_name || c.p.email;
+      const badges = Object.entries(c.counts).filter(([, n]) => n)
+        .map(([k, n]) => `<span class="badge ${BOARD_BADGE[k].cls} badge-sm">${n} ${BOARD_BADGE[k].label}${n === 1 ? "" : "s"}</span>`).join(" ");
+      const det = el("details", "card rfp-board-card" + (idx === 0 ? " rfp-board-top" : ""));
+      det.innerHTML =
+        `<summary class="rfp-board-head">
+          <span class="cluster cluster-sm">
+            <span class="avatar avatar-sm">${esc(name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase())}</span>
+            <strong>${esc(name)}</strong>
+            ${c.p.user_id === state.user.id ? '<span class="text-secondary text-sm">(you)</span>' : ""}
+          </span>
+          <span class="cluster cluster-sm">${badges}<strong class="rfp-board-total">${c.items.length}</strong></span>
+        </summary>
+        <div class="rfp-board-items">
+          ${c.items.map(i => `
+            <div class="rfp-board-item" ${i.q ? `data-open-q="${esc(i.q.id)}"` : (i.rfpId ? `data-open-rfp="${esc(i.rfpId)}"` : "")}>
+              <span class="badge ${BOARD_BADGE[i.kind].cls} badge-sm">${BOARD_BADGE[i.kind].label}</span>
+              <code class="text-xs">${esc(i.ref)}</code>
+              <span class="text-sm rfp-board-q">${esc(i.text.slice(0, 140))}</span>
+            </div>`).join("")}
+        </div>`;
+      $$("[data-open-q]", det).forEach(n => n.addEventListener("click", () => {
+        const q = state.questions.find(x => x.id === n.dataset.openQ); if (q) openDrawer(q);
+      }));
+      $$("[data-open-rfp]", det).forEach(n => n.addEventListener("click", () => openRfp(n.dataset.openRfp)));
+      wrap.appendChild(det);
+    });
+  }
+
+  /* ========================================================================
+     ADMIN — users & DRI mapping (v0.7.0)
+     ======================================================================== */
+  function renderAdmin() {
+    if (!isAdmin()) return;
+    const roleOpts = ["viewer", "editor", "admin"];
+
+    const utb = $("#admin-user-rows"); utb.innerHTML = "";
+    state.profilesAll.slice().sort((a, b) => (a.full_name || a.email || "").localeCompare(b.full_name || b.email || "")).forEach(p => {
+      const ownedCats = state.drisAll.filter(d => d.user_id === p.user_id)
+        .map(d => (state.categories.find(c => c.id === d.category_id) || {}).code).filter(Boolean);
+      const self = p.user_id === state.user.id;
+      const tr = el("tr");
+      tr.innerHTML =
+        `<td><strong>${esc(p.full_name || "—")}</strong>${self ? ' <span class="text-secondary text-sm">(you)</span>' : ""}</td>` +
+        `<td class="text-sm text-secondary">${esc(p.email || "")}</td>` +
+        `<td></td>` +
+        `<td class="text-sm">${ownedCats.length ? esc(ownedCats.join(", ")) : '<span class="text-secondary">—</span>'}</td>`;
+      const sel = el("select", "select select-sm");
+      roleOpts.forEach(r => sel.appendChild(new Option(r.replace(/^\w/, ch => ch.toUpperCase()), r)));
+      sel.value = p.role;
+      sel.disabled = self;   // can't demote yourself by accident
+      if (self) sel.title = "You can't change your own role.";
+      sel.addEventListener("change", async () => {
+        const { error } = await state.sb.from("profiles").update({ role: sel.value }).eq("user_id", p.user_id);
+        if (error) { sel.value = p.role; return toast(error.message, "danger"); }
+        p.role = sel.value;
+        toast(`${p.full_name || p.email} is now ${sel.value}`);
+        renderAdmin();
+      });
+      tr.children[2].appendChild(sel);
+      utb.appendChild(tr);
+    });
+
+    const dtb = $("#admin-dri-rows"); dtb.innerHTML = "";
+    state.categories.forEach(c => {
+      const qCount = state.questions.filter(q => q.category === c.name).length;
+      const current = primaryDriForCategoryId(c.id);
+      const tr = el("tr");
+      tr.innerHTML =
+        `<td><strong>${esc(c.name)}</strong> <span class="text-secondary text-sm">${esc(c.code)}</span></td>` +
+        `<td class="text-center">${qCount}</td><td></td>`;
+      const sel = el("select", "select select-sm");
+      sel.appendChild(new Option("— No DRI —", ""));
+      editorProfiles().forEach(p => sel.appendChild(new Option(p.full_name || p.email, p.user_id)));
+      sel.value = current || "";
+      sel.addEventListener("change", async () => {
+        const del = await state.sb.from("category_dris").delete().eq("category_id", c.id);
+        if (del.error) { sel.value = current || ""; return toast(del.error.message, "danger"); }
+        if (sel.value) {
+          const ins = await state.sb.from("category_dris").insert({ category_id: c.id, user_id: sel.value, is_primary: true });
+          if (ins.error) { sel.value = current || ""; return toast(ins.error.message, "danger"); }
+        }
+        // refresh local mapping + own todo state
+        const { data } = await state.sb.from("category_dris").select("category_id,user_id,is_primary");
+        state.drisAll = data || [];
+        state.myCategoryIds = new Set(state.drisAll.filter(d => d.user_id === state.user.id).map(d => d.category_id));
+        toast(`${c.name} → ${sel.value ? nameOf(sel.value) : "no DRI"}`);
+        renderUserBox(); renderAdmin();
+      });
+      tr.children[2].appendChild(sel);
+      dtb.appendChild(tr);
+    });
   }
 })();

@@ -155,3 +155,26 @@
   .rfp-detail-ans { max-width: 26rem; }
   #rfps-rows tr { cursor: pointer; }
 }
+
+/* v0.7.0 — inline logo theming (v2.38 CSS predates the --logo-* vars) */
+:root {
+  --logo-ring-stroke: transparent;
+  --logo-emblem-fill: var(--color-brand-primary, #007aff);
+  --logo-cloud-fill: #ffffff;
+  --logo-text-fill: var(--color-text-primary, #14293e);
+}
+[data-theme="dark"] { --logo-text-fill: var(--color-text-primary, #f4f7fa); }
+
+/* v0.7.0 — team board */
+@layer app {
+  .rfp-board-card { padding: 0; overflow: hidden; }
+  .rfp-board-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md);
+                    padding: var(--space-md) var(--space-lg); cursor: pointer; list-style: none; }
+  .rfp-board-head::-webkit-details-marker { display: none; }
+  .rfp-board-total { font-size: var(--font-size-lg); min-width: 2rem; text-align: right; }
+  .rfp-board-top .rfp-board-total { color: var(--color-danger, #c62828); }
+  .rfp-board-items { border-top: 1px solid var(--color-border, #e3e8ee); padding: var(--space-sm) var(--space-lg); }
+  .rfp-board-item { display: flex; align-items: baseline; gap: var(--space-sm); padding: var(--space-2xs) 0; cursor: pointer; }
+  .rfp-board-item:hover .rfp-board-q { text-decoration: underline; }
+  .rfp-board-q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
