@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.5.0";
+  const APP_VERSION = "v0.6.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -56,13 +56,28 @@
     myCategoryIds: new Set(),
     questions: [], categories: [], resources: [],
     provCounts: {}, latestAttest: {}, current: null,
-    imp: null           // New-RFP import session (see import module below)
+    imp: null,          // New-RFP import session (see import module below)
+    profilesAll: [],    // all profiles (names for assignment display)
+    drisAll: [],        // full category_dris mapping (for default assignees)
+    rfps: [],           // response projects (list view)
+    rfpsAgg: {},        // rfp_id -> {total, done}
+    currentRfp: null,   // open response project
+    currentRfpRows: [], // its rows
+    rfpTodos: [],       // pending rfp_rows assigned to me
+    approveRow: null    // row open in the approve modal
   };
 
   const isAdmin = () => (state.profile && state.profile.role === "admin");
   const isEditor = () => (state.profile && (state.profile.role === "admin" || state.profile.role === "editor"));
   const catIdByName = (name) => { const c = state.categories.find(c => c.name === name); return c ? c.id : -1; };
   const canEdit = (row) => isAdmin() || state.myCategoryIds.has(catIdByName(row.category));
+  const nameOf = (uid) => { const p = state.profilesAll.find(p => p.user_id === uid); return p ? (p.full_name || p.email) : "—"; };
+  const editorProfiles = () => state.profilesAll.filter(p => p.role === "admin" || p.role === "editor");
+  function primaryDriForCategoryId(catId) {
+    const rows = state.drisAll.filter(d => d.category_id === catId);
+    const primary = rows.find(d => d.is_primary) || rows[0];
+    return primary ? primary.user_id : null;
+  }
 
   function setVersion() {
     ["#app-version-login", "#app-version-side"].forEach(sel => { const n = $(sel); if (n) n.textContent = APP_VERSION; });
@@ -84,8 +99,13 @@
     $("[data-collapse]").addEventListener("click", () => $(".app-sidebar").classList.toggle("is-collapsed"));
     $$("[data-drawer-close]").forEach(b => b.addEventListener("click", closeDrawer));
     $$("[data-newq-close]").forEach(b => b.addEventListener("click", closeNewQ));
-    document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeNewQ(); } });
-    $$("[data-nav]").forEach(a => a.addEventListener("click", () => setTimeout(route, 0)));
+    $$("[data-create-close]").forEach(b => b.addEventListener("click", closeCreateModal));
+    $$("[data-approve-close]").forEach(b => b.addEventListener("click", closeApproveModal));
+    document.addEventListener("keydown", e => { if (e.key === "Escape") { closeDrawer(); closeNewQ(); closeCreateModal(); closeApproveModal(); } });
+    $$("[data-nav]").forEach(a => a.addEventListener("click", () => {
+      if (a.dataset.nav === "rfps") state.currentRfp = null;   // nav always returns to the list
+      setTimeout(route, 0);
+    }));
     window.addEventListener("hashchange", route);
     ["#search", "#filter-category", "#filter-status", "#filter-tier"].forEach(sel => $(sel).addEventListener("input", renderBrowser));
     $("#new-q-btn").addEventListener("click", openNewQ);
@@ -107,24 +127,33 @@
     state.user = user;
     $("#login-view").hidden = true; $("#app-shell").hidden = false;
     const sb = state.sb;
-    const [cats, prof, dris, res, prov, att] = await Promise.all([
+    const [cats, profAll, drisAll, res, prov, att] = await Promise.all([
       sb.from("categories").select("id,code,name,sort_order").order("sort_order"),
-      sb.from("profiles").select("user_id,email,full_name,role").eq("user_id", user.id).maybeSingle(),
-      sb.from("category_dris").select("category_id").eq("user_id", user.id),
+      sb.from("profiles").select("user_id,email,full_name,role"),
+      sb.from("category_dris").select("category_id,user_id,is_primary"),
       sb.from("resources").select("*"),
       sb.from("provenance").select("question_id").range(0, 5000),
       sb.from("attestations").select("question_id,outcome,attested_at").eq("user_id", user.id).order("attested_at", { ascending: false })
     ]);
     state.categories = cats.data || [];
-    state.profile = prof.data || { email: user.email, full_name: user.email, role: "viewer" };
-    state.myCategoryIds = new Set((dris.data || []).map(d => d.category_id));
+    state.profilesAll = profAll.data || [];
+    state.profile = state.profilesAll.find(p => p.user_id === user.id) || { user_id: user.id, email: user.email, full_name: user.email, role: "viewer" };
+    state.drisAll = drisAll.data || [];
+    state.myCategoryIds = new Set(state.drisAll.filter(d => d.user_id === user.id).map(d => d.category_id));
     state.resources = res.data || [];
     state.provCounts = {};
     (prov.data || []).forEach(r => { state.provCounts[r.question_id] = (state.provCounts[r.question_id] || 0) + 1; });
     state.latestAttest = {};
     (att.data || []).forEach(a => { if (!state.latestAttest[a.question_id]) state.latestAttest[a.question_id] = a; });
-    await loadQuestions();
+    await Promise.all([loadQuestions(), loadRfpTodos()]);
     renderUserBox(); populateCategoryFilter(); populateNewQCats(); route();
+  }
+
+  async function loadRfpTodos() {
+    const { data } = await state.sb.from("rfp_rows")
+      .select("id,rfp_id,seq,question,band,answer,include,matched_qid,rfps(name,status)")
+      .eq("assigned_to", state.user.id).eq("status", "pending");
+    state.rfpTodos = (data || []).filter(r => !r.rfps || r.rfps.status !== "finalised");
   }
 
   async function loadQuestions() {
@@ -137,7 +166,7 @@
     $("#user-name").textContent = name;
     $("#user-role").textContent = (state.profile.role || "viewer").replace(/^\w/, c => c.toUpperCase());
     $("#user-avatar").textContent = name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
-    const todo = ownedQuestions().filter(q => todoFor(q).rank < 3).length;
+    const todo = ownedQuestions().filter(q => todoFor(q).rank < 3).length + state.rfpTodos.length;
     const nav = $("#attest-nav-count");
     if (todo) { nav.textContent = todo; nav.hidden = false; } else nav.hidden = true;
     $("#new-q-btn").hidden = !isEditor();
@@ -161,12 +190,15 @@
     let view = "browser";
     if (hash.includes("attest")) view = "attest";
     else if (hash.includes("import")) view = "import";
+    else if (hash.includes("rfps")) view = "rfps";
     $("#browser-view").hidden = view !== "browser";
     $("#attest-view").hidden = view !== "attest";
     $("#import-view").hidden = view !== "import";
+    $("#rfps-view").hidden = view !== "rfps";
     $$("[data-nav]").forEach(a => a.classList.toggle("is-active", a.dataset.nav === view));
     if (view === "browser") renderBrowser();
     else if (view === "attest") renderAttest();
+    else if (view === "rfps") renderRfps();
     else renderImport();
   }
 
@@ -442,8 +474,9 @@
 
   function renderAttest() {
     const owned = ownedQuestions();
-    $("#attest-not-dri").hidden = owned.length > 0;
+    $("#attest-not-dri").hidden = owned.length > 0 || state.rfpTodos.length > 0;
     $("#attest-table-wrap").hidden = owned.length === 0;
+    renderAttestRfpTodos();
     $("#stat-owned").textContent = owned.length;
     $("#stat-attested").textContent = owned.filter(confirmedThisMonth).length;
     $("#stat-blank").textContent = owned.filter(q => q.status === "approved-blank" || !q.answer).length;
@@ -483,6 +516,31 @@
     });
   }
 
+  function renderAttestRfpTodos() {
+    const wrap = $("#attest-rfp-wrap");
+    wrap.hidden = state.rfpTodos.length === 0;
+    if (!state.rfpTodos.length) return;
+    const tb = $("#attest-rfp-rows"); tb.innerHTML = "";
+    state.rfpTodos.forEach(t => {
+      const b = IMP_BAND[t.band] || IMP_BAND.gap;
+      const tr = el("tr");
+      tr.innerHTML =
+        `<td class="text-sm"><strong>${esc(t.rfps ? t.rfps.name : "RFP")}</strong></td>` +
+        `<td class="rfp-qa-q">${esc(t.question.slice(0, 160))}</td>` +
+        `<td><span class="badge ${b.cls} badge-sm">${b.label}</span></td>` +
+        `<td class="text-right"></td>`;
+      const btn = el("button", "button button-primary button-sm", '<i class="fa-solid fa-pen"></i> Review');
+      btn.addEventListener("click", async () => {
+        location.hash = "#/rfps";
+        await openRfp(t.rfp_id);
+        const row = state.currentRfpRows.find(r => r.id === t.id);
+        if (row) openApproveModal(row);
+      });
+      tr.lastChild.appendChild(btn);
+      tb.appendChild(tr);
+    });
+  }
+
   function fmtDate(iso) { try { if (window.ds && ds.i18n) return ds.i18n.formatDate(new Date(iso)); return new Date(iso).toLocaleDateString(); } catch (_) { return String(iso).slice(0, 10); } }
 
   /* ========================================================================
@@ -508,10 +566,13 @@
     $("#import-headerrow").addEventListener("change", () => { state.imp.headerRow = parseInt($("#import-headerrow").value, 10); impRefreshColumns(); });
     $("#import-run").addEventListener("click", impRun);
     ["#import-search", "#import-filter-band"].forEach(s => $(s).addEventListener("input", renderImportRows));
-    $("#import-download").addEventListener("click", impDownload);
-    $("#import-pushkb").addEventListener("click", openKbModal);
-    $$("[data-kb-close]").forEach(b => b.addEventListener("click", closeKbModal));
-    $("#kb-save").addEventListener("click", saveKbQuestions);
+    $("#import-create").addEventListener("click", openCreateModal);
+    $("#create-save").addEventListener("click", saveCreateProject);
+    $("#approve-save").addEventListener("click", saveApprove);
+    $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
+    $("#rfp-back").addEventListener("click", () => { state.currentRfp = null; renderRfps(); });
+    $("#rfp-finalise").addEventListener("click", finaliseRfp);
+    $("#rfp-download-final").addEventListener("click", downloadFinal);
   }
 
   function renderImport() {
@@ -547,7 +608,7 @@
       const buf = await f.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array" });
       if (!wb.SheetNames.length) { showImpError("That file has no sheets we can read."); return; }
-      state.imp = { fileName: f.name, wb, sheetNames: wb.SheetNames };
+      state.imp = { fileName: f.name, buf, wb, sheetNames: wb.SheetNames };
       const sel = $("#import-sheet"); sel.innerHTML = "";
       wb.SheetNames.forEach(n => sel.appendChild(new Option(n, n)));
       $("#import-file-name").textContent = f.name;
@@ -665,7 +726,7 @@
         chosenId: chosen ? chosen.id : null,
         answer: chosen ? (chosen.answer || "") : "",
         overridden: false,
-        include: band !== "gap" && !!(chosen && chosen.answer),
+        include: true,           // gaps included by default — a DRI writes the answer
         addedId: null
       });
     }
@@ -676,19 +737,21 @@
     renderImportRows();
   }
 
+  // A row is auto-approved when it is a strong match whose KB answer is used
+  // untouched. Everything else that's included needs a DRI to approve it.
+  const rowIsAuto = (r) => r.band === "strong" && !!r.answer && !r.overridden;
+
   function renderImportStats() {
     const rows = state.imp.rows;
     $("#imp-stat-total").textContent = rows.length;
     $("#imp-stat-strong").textContent = rows.filter(r => r.band === "strong").length;
     $("#imp-stat-partial").textContent = rows.filter(r => r.band === "partial").length;
     $("#imp-stat-gap").textContent = rows.filter(r => r.band === "gap").length;
-    const inc = rows.filter(r => r.include && r.answer).length;
-    const gaps = rows.filter(r => r.band === "gap" && !r.addedId).length;
-    $("#import-action-summary").textContent = `${inc} of ${rows.length} answers ready to export`;
-    $("#import-action-sub").textContent = gaps ? `${gaps} gap${gaps === 1 ? "" : "s"} with no knowledge-base answer.` : "Every question has a drafted answer.";
-    const pushBtn = $("#import-pushkb");
-    if (isEditor() && gaps) { pushBtn.hidden = false; pushBtn.innerHTML = `<i class="fa-solid fa-database"></i> Add ${gaps} gap${gaps === 1 ? "" : "s"} to knowledge base`; }
-    else pushBtn.hidden = true;
+    const included = rows.filter(r => r.include);
+    const auto = included.filter(rowIsAuto).length;
+    const need = included.length - auto;
+    $("#import-action-summary").textContent = `${auto} answer${auto === 1 ? "" : "s"} auto-approved · ${need} need${need === 1 ? "s" : ""} DRI review`;
+    $("#import-action-sub").textContent = "Create a response project to assign DRIs. The response document can be produced once every answer is approved.";
   }
 
   function renderImportRows() {
@@ -748,28 +811,6 @@
     $("#import-summary").textContent = `${state.imp.fileName} — ${shown} shown of ${rows.length} questions.`;
   }
 
-  function impDownload() {
-    const { wb, sheetName, aoa, headerRow, rows } = state.imp;
-    let writeCol = state.imp.aCol;
-    const ws = wb.Sheets[sheetName];
-    const ncols = aoa.reduce((m, r) => Math.max(m, r.length), 0);
-    if (writeCol < 0) {
-      writeCol = ncols;
-      XLSX.utils.sheet_add_aoa(ws, [["Cloudstaff Response"]], { origin: { r: headerRow, c: writeCol } });
-    }
-    let written = 0;
-    rows.forEach(r => {
-      if (r.include && r.answer) { XLSX.utils.sheet_add_aoa(ws, [[r.answer]], { origin: { r: r.rowIdx, c: writeCol } }); written++; }
-    });
-    // make sure the sheet range covers the new column
-    const ref = XLSX.utils.decode_range(ws["!ref"]);
-    if (writeCol > ref.e.c) { ref.e.c = writeCol; ws["!ref"] = XLSX.utils.encode_range(ref); }
-    const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-    const base = state.imp.fileName.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
-    downloadBlob(new Blob([out], { type: "application/octet-stream" }), `${base} — Cloudstaff responses.xlsx`);
-    toast(`Filled ${written} answer${written === 1 ? "" : "s"} into ${colLetter(writeCol)}`);
-  }
-
   function downloadBlob(blob, name) {
     const url = URL.createObjectURL(blob);
     const a = el("a"); a.href = url; a.download = name;
@@ -777,69 +818,346 @@
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   }
 
-  // ---- write new (gap) questions back into the knowledge base -------------
-  function openKbModal() {
-    if (!isEditor()) return;
-    const gaps = state.imp.rows.filter(r => r.band === "gap" && !r.addedId);
-    if (!gaps.length) return;
-    const cats = isAdmin() ? state.categories : state.categories.filter(c => state.myCategoryIds.has(c.id));
-    const body = $("#kb-body");
-    if (!cats.length) {
-      body.innerHTML = `<div class="alert alert-warning"><i class="alert-icon fa-solid fa-user-shield"></i><span>You're not a DRI for any category, so you can't add questions. Ask an admin to assign you, or add them from an admin account.</span></div>`;
-      $("#kb-save").disabled = true;
-      openOverlay("#kb-overlay"); return;
-    }
-    $("#kb-save").disabled = false;
-    const catOpts = cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-    body.innerHTML =
-      `<p class="text-secondary text-sm">Assign a category and confirm the wording for each new question. New questions are saved for DRI review (they won't overwrite anything). ${isAdmin() ? "" : "You can only file into categories you own."}</p>` +
-      gaps.map((r, i) => `
-        <div class="rfp-kb-item card" data-kb-row="${r.seq}">
-          <label class="check" style="margin-bottom:var(--space-xs)"><input type="checkbox" class="kb-inc" checked> <strong>Q${r.seq}</strong></label>
-          <div class="field"><label class="field-label">Question</label><textarea class="textarea kb-q" rows="2">${esc(r.question)}</textarea></div>
-          <div class="cluster cluster-sm">
-            <div class="field flex-1"><label class="field-label">Category</label><select class="select kb-cat">${catOpts}</select></div>
-            <div class="field"><label class="field-label">Tier</label><select class="select kb-tier"><option>Client</option><option>Internal</option></select></div>
-          </div>
-          <div class="field"><label class="field-label">Answer (optional)</label><textarea class="textarea kb-a" rows="2" placeholder="Leave blank to write later.">${esc(r.answer)}</textarea></div>
-        </div>`).join("");
-    $("#kb-error").hidden = true;
-    openOverlay("#kb-overlay");
-  }
   function openOverlay(sel) { $(sel).hidden = false; document.body.style.overflow = "hidden"; }
-  function closeKbModal() { $("#kb-overlay").hidden = true; document.body.style.overflow = ""; }
 
-  async function saveKbQuestions() {
-    const err = $("#kb-error"); err.hidden = true;
-    const items = $$("#kb-body [data-kb-row]").filter(n => $(".kb-inc", n).checked);
-    if (!items.length) { err.textContent = "Nothing selected."; err.hidden = false; return; }
-    const btn = $("#kb-save"); btn.classList.add("is-loading"); btn.disabled = true;
-    const stamp = new Date().toISOString().slice(0, 10);
-    const src = `Imported from ${state.imp.fileName} · ${stamp}`;
-    let ok = 0, fail = 0;
-    for (const node of items) {
-      const seq = parseInt(node.dataset.kbRow, 10);
-      const row = state.imp.rows.find(r => r.seq === seq);
-      const catId = parseInt($(".kb-cat", node).value, 10);
-      const question = $(".kb-q", node).value.trim();
-      const tier = $(".kb-tier", node).value;
-      const answer = $(".kb-a", node).value.trim() || null;
-      if (!question || !catId) { fail++; continue; }
-      const status = answer ? "edit-pending" : "approved-blank";
+  /* ========================================================================
+     RESPONSE PROJECTS — create → DRI approval → finalise (v0.6.0)
+     ======================================================================== */
+  const RFP_STATUS = {
+    auto:     { cls: "badge-success", label: "Auto-approved" },
+    pending:  { cls: "badge-warning", label: "Awaiting DRI" },
+    approved: { cls: "badge-success", label: "Approved" }
+  };
+
+  // ---- create project from the current import session ---------------------
+  function pendingImportRows() {
+    return state.imp.rows.filter(r => r.include && !rowIsAuto(r));
+  }
+
+  function defaultAssignee(r) {
+    if (!r.chosenId) return "";                       // gap — uploader must pick
+    const kb = state.imp.byId[r.chosenId];
+    if (!kb) return "";
+    const uid = primaryDriForCategoryId(catIdByName(kb.category));
+    return uid || "";
+  }
+
+  function openCreateModal() {
+    if (!state.imp || !state.imp.rows) return;
+    const pending = pendingImportRows();
+    const auto = state.imp.rows.filter(r => r.include && rowIsAuto(r)).length;
+    $("#create-name").value = state.imp.fileName.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
+    $("span", $("#create-auto-note")).textContent =
+      `${auto} strong match${auto === 1 ? "" : "es"} to approved knowledge-base answers will be auto-approved.`;
+    const editors = editorProfiles();
+    const opts = (selId) => `<option value="">— Choose a DRI —</option>` +
+      editors.map(p => `<option value="${p.user_id}" ${p.user_id === selId ? "selected" : ""}>${esc(p.full_name || p.email)}</option>`).join("");
+    const list = $("#create-assign-list");
+    if (!pending.length) {
+      list.innerHTML = `<div class="alert alert-success banner-inline"><i class="alert-icon fa-solid fa-circle-check"></i><span>Nothing needs review — every included answer is a strong match. You can finalise right after creating.</span></div>`;
+    } else {
+      list.innerHTML = pending.map(r => {
+        const b = IMP_BAND[r.band];
+        return `<div class="rfp-kb-item card" data-assign-row="${r.seq}">
+          <div class="cluster" style="justify-content:space-between">
+            <span><strong>Q${r.seq}</strong> <span class="badge ${b.cls} badge-sm">${b.label}</span>${r.overridden ? ' <span class="badge badge-info badge-sm">Edited</span>' : ""}</span>
+          </div>
+          <p class="text-sm rfp-assign-q">${esc(r.question.slice(0, 180))}</p>
+          <div class="field"><label class="field-label">DRI</label>
+            <select class="select assign-sel">${opts(defaultAssignee(r))}</select></div>
+        </div>`;
+      }).join("");
+    }
+    $("#create-error").hidden = true;
+    openOverlay("#create-overlay");
+  }
+  function closeCreateModal() { $("#create-overlay").hidden = true; document.body.style.overflow = ""; }
+
+  async function saveCreateProject() {
+    const err = $("#create-error"); err.hidden = true;
+    const name = $("#create-name").value.trim();
+    if (!name) { err.textContent = "Give the project a name."; err.hidden = false; return; }
+    const nodes = $$("#create-assign-list [data-assign-row]");
+    const assignments = {};
+    for (const n of nodes) {
+      const uid = $(".assign-sel", n).value;
+      if (!uid) { err.textContent = "Every question that needs review must have a DRI assigned."; err.hidden = false; return; }
+      assignments[parseInt(n.dataset.assignRow, 10)] = uid;
+    }
+    const btn = $("#create-save"); btn.classList.add("is-loading"); btn.disabled = true;
+
+    const rfpId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2));
+    const safeName = state.imp.fileName.replace(/[^\w.\- ]+/g, "_");
+    const storagePath = `${rfpId}/${safeName}`;
+
+    // 1) original workbook into Storage so finalise can rebuild it later
+    const up = await state.sb.storage.from("rfps").upload(storagePath,
+      new Blob([state.imp.buf], { type: "application/octet-stream" }), { upsert: true });
+    if (up.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = "Upload failed: " + up.error.message; err.hidden = false; return; }
+
+    // 2) project row
+    const proj = {
+      id: rfpId, name, file_name: state.imp.fileName, storage_path: storagePath,
+      sheet_name: state.imp.sheetName, header_row: state.imp.headerRow,
+      q_col: state.imp.qCol, a_col: state.imp.aCol, created_by: state.user.id
+    };
+    const r1 = await state.sb.from("rfps").insert(proj);
+    if (r1.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = r1.error.message; err.hidden = false; return; }
+
+    // 3) question rows
+    const rowsIns = state.imp.rows.map(r => {
+      const auto = r.include && rowIsAuto(r);
+      const top = r.chosenId ? (r.cands.find(c => c.q.id === r.chosenId) || null) : null;
+      return {
+        rfp_id: rfpId, seq: r.seq, row_idx: r.rowIdx, question: r.question,
+        matched_qid: r.chosenId, score: top ? Math.round(top.score * 1000) / 1000 : null,
+        band: r.band, answer: r.answer || null, include: r.include,
+        status: r.include ? (auto ? "auto" : "pending") : "auto",
+        assigned_to: (r.include && !auto) ? (assignments[r.seq] || null) : null
+      };
+    });
+    const r2 = await state.sb.from("rfp_rows").insert(rowsIns);
+    btn.classList.remove("is-loading"); btn.disabled = false;
+    if (r2.error) { err.textContent = r2.error.message; err.hidden = false; return; }
+
+    closeCreateModal();
+    toast(`Response project "${name}" created`);
+    resetImport();
+    state.rfps = [];              // force list reload
+    await loadRfpTodos(); renderUserBox();
+    location.hash = "#/rfps";
+    await openRfp(rfpId);
+  }
+
+  // ---- list & detail ------------------------------------------------------
+  async function renderRfps() {
+    $("#rfps-list-wrap").hidden = !!state.currentRfp;
+    $("#rfp-detail-wrap").hidden = !state.currentRfp;
+    if (state.currentRfp) { renderRfpDetail(); return; }
+    const [ps, rs] = await Promise.all([
+      state.sb.from("rfps").select("*").order("created_at", { ascending: false }),
+      state.sb.from("rfp_rows").select("rfp_id,status,include")
+    ]);
+    state.rfps = ps.data || [];
+    state.rfpsAgg = {};
+    (rs.data || []).forEach(r => {
+      const a = state.rfpsAgg[r.rfp_id] || (state.rfpsAgg[r.rfp_id] = { total: 0, done: 0 });
+      if (!r.include) return;
+      a.total++;
+      if (r.status !== "pending") a.done++;
+    });
+    const tb = $("#rfps-rows"); tb.innerHTML = "";
+    $("#rfps-empty").hidden = state.rfps.length > 0;
+    state.rfps.forEach(p => {
+      const a = state.rfpsAgg[p.id] || { total: 0, done: 0 };
+      const fin = p.status === "finalised";
+      const tr = el("tr");
+      tr.innerHTML =
+        `<td><strong>${esc(p.name)}</strong></td>` +
+        `<td class="text-sm text-secondary">${esc(p.file_name)}</td>` +
+        `<td class="text-sm">${fmtDate(p.created_at)}</td>` +
+        `<td class="text-sm">${a.done} / ${a.total}${a.done === a.total ? ' <i class="fa-solid fa-circle-check text-sm" style="color:var(--color-success, #1a7f37)"></i>' : ""}</td>` +
+        `<td><span class="badge ${fin ? "badge-success" : "badge-warning"} badge-sm">${fin ? "Finalised" : "In review"}</span></td>`;
+      tr.addEventListener("click", () => openRfp(p.id));
+      tb.appendChild(tr);
+    });
+    $("#rfps-summary").textContent = state.rfps.length
+      ? `${state.rfps.length} response project${state.rfps.length === 1 ? "" : "s"}.`
+      : "Response projects awaiting DRI approval, and finalised documents.";
+  }
+
+  async function openRfp(id) {
+    const [p, rs] = await Promise.all([
+      state.sb.from("rfps").select("*").eq("id", id).single(),
+      state.sb.from("rfp_rows").select("*").eq("rfp_id", id).order("seq")
+    ]);
+    if (p.error) { toast(p.error.message, "danger"); return; }
+    state.currentRfp = p.data;
+    state.currentRfpRows = rs.data || [];
+    location.hash = "#/rfps";
+    $("#rfps-view").hidden = false;
+    renderRfps();
+  }
+
+  function renderRfpDetail() {
+    const p = state.currentRfp, rows = state.currentRfpRows;
+    const included = rows.filter(r => r.include);
+    const auto = included.filter(r => r.status === "auto").length;
+    const approved = included.filter(r => r.status === "approved").length;
+    const pending = included.filter(r => r.status === "pending").length;
+    const fin = p.status === "finalised";
+    const canManage = isAdmin() || p.created_by === state.user.id;
+
+    $("#rfp-detail-name").textContent = p.name;
+    $("#rfp-detail-sub").textContent = `${p.file_name} · uploaded ${fmtDate(p.created_at)} by ${nameOf(p.created_by)}` + (fin ? ` · finalised ${fmtDate(p.finalised_at)}` : "");
+    $("#rfp-detail-status").innerHTML = `<span class="badge ${fin ? "badge-success" : "badge-warning"} badge-sm">${fin ? "Finalised" : "In review"}</span>`;
+    $("#rfp-stat-total").textContent = included.length;
+    $("#rfp-stat-auto").textContent = auto;
+    $("#rfp-stat-approved").textContent = approved;
+    $("#rfp-stat-pending").textContent = pending;
+    $("#rfp-finalise").hidden = !(canManage && !fin && pending === 0 && included.length > 0);
+    $("#rfp-download-final").hidden = !(fin && p.finalised_path);
+
+    const tb = $("#rfp-detail-rows"); tb.innerHTML = "";
+    rows.forEach(r => {
+      const st = RFP_STATUS[r.status] || RFP_STATUS.pending;
+      const b = IMP_BAND[r.band] || IMP_BAND.gap;
+      const mine = r.assigned_to === state.user.id;
+      const kbid = r.added_qid || r.matched_qid;
+      const tr = el("tr");
+      if (!r.include) tr.style.opacity = "0.5";
+      tr.innerHTML =
+        `<td class="text-secondary text-sm">${r.seq}</td>` +
+        `<td class="rfp-imp-q">${esc(r.question.slice(0, 200))}${r.include ? "" : '<small class="text-secondary">Excluded from document</small>'}</td>` +
+        `<td><span class="badge ${b.cls} badge-sm">${b.label}</span>${kbid ? `<div><a href="#" class="text-sm rfp-detail-view" data-view="${esc(kbid)}">${esc(kbid)}</a></div>` : ""}</td>` +
+        `<td class="text-sm rfp-detail-ans">${esc((r.answer || "—").slice(0, 160))}</td>` +
+        `<td class="text-sm">${r.assigned_to ? esc(nameOf(r.assigned_to)) : '<span class="text-secondary">—</span>'}</td>` +
+        `<td class="text-right"></td>`;
+      const cell = tr.lastChild;
+      const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
+      if (r.status === "pending" && !fin && (mine || isAdmin())) {
+        const btn = el("button", "button button-primary button-sm", '<i class="fa-solid fa-pen"></i> Review');
+        btn.addEventListener("click", e => { e.stopPropagation(); openApproveModal(r); });
+        actions.append(btn);
+      } else {
+        actions.append(el("span", `badge ${st.cls} badge-sm`, st.label));
+      }
+      cell.appendChild(actions);
+      const view = $(".rfp-detail-view", tr);
+      if (view) view.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); const q = state.questions.find(x => x.id === view.dataset.view); if (q) openDrawer(q); });
+      tb.appendChild(tr);
+    });
+  }
+
+  // ---- approve modal ------------------------------------------------------
+  function openApproveModal(row) {
+    state.approveRow = row;
+    const b = IMP_BAND[row.band] || IMP_BAND.gap;
+    $("#approve-question").textContent = row.question;
+    $("#approve-matchinfo").innerHTML = row.matched_qid
+      ? `Matched to <strong>${esc(row.matched_qid)}</strong> (${b.label.toLowerCase()}${row.score ? `, ${Math.round(row.score * 100)}%` : ""}). Edit the answer if needed, then approve.`
+      : "No knowledge-base match — write the answer to send.";
+    $("#approve-answer").value = row.answer || "";
+    $("#approve-include").checked = !!row.include;
+    // offer add-to-KB only for rows that aren't already tied to a KB question
+    const kbBlock = $("#approve-kb-block");
+    const cats = isAdmin() ? state.categories : state.categories.filter(c => state.myCategoryIds.has(c.id));
+    if (!row.matched_qid && !row.added_qid && cats.length) {
+      kbBlock.hidden = false;
+      $("#approve-addkb").checked = false;
+      $("#approve-kb-fields").hidden = true;
+      const sel = $("#approve-kb-cat"); sel.innerHTML = "";
+      cats.forEach(c => sel.appendChild(new Option(c.name, c.id)));
+    } else kbBlock.hidden = true;
+    $("#approve-error").hidden = true;
+    openOverlay("#approve-overlay");
+  }
+  function closeApproveModal() { $("#approve-overlay").hidden = true; document.body.style.overflow = ""; state.approveRow = null; }
+
+  async function saveApprove() {
+    const row = state.approveRow; if (!row) return;
+    const err = $("#approve-error"); err.hidden = true;
+    const answer = $("#approve-answer").value.trim();
+    const include = $("#approve-include").checked;
+    if (include && !answer) { err.textContent = "Write the answer, or untick Include to leave this question out."; err.hidden = false; return; }
+    const btn = $("#approve-save"); btn.classList.add("is-loading"); btn.disabled = true;
+
+    let addedQid = row.added_qid || null;
+    if (!$("#approve-kb-block").hidden && $("#approve-addkb").checked && answer) {
+      const catId = parseInt($("#approve-kb-cat").value, 10);
+      const tier = $("#approve-kb-tier").value;
       const id = nextIdForCategory(catId);
-      const q1 = await state.sb.from("canonical_questions").insert({ id, category_id: catId, question, tier, status, needs_rework: !!answer, sample_only: false });
-      if (q1.error) { fail++; continue; }
+      const src = `RFP response · ${new Date().toISOString().slice(0, 10)}`;
+      const q1 = await state.sb.from("canonical_questions").insert({ id, category_id: catId, question: row.question, tier, status: "approved", needs_rework: false, sample_only: false });
+      if (q1.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = q1.error.message; err.hidden = false; return; }
       await state.sb.from("canonical_answers").insert({ question_id: id, answer, answer_source: src, updated_by: state.user.id });
-      await state.sb.from("answer_versions").insert({ question_id: id, answer, answer_source: src, note: `Imported from ${state.imp.fileName} (row ${row ? row.rowIdx + 1 : "?"}) by ${state.profile.email}`, created_by: state.user.id });
-      if (row) { row.addedId = id; row.band = "partial"; row.chosenId = id; }
-      // keep local list roughly current so nextIdForCategory increments
-      state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status, question, answer, needs_rework: !!answer });
-      ok++;
+      await state.sb.from("answer_versions").insert({ question_id: id, answer, answer_source: src, note: `Approved in RFP response by ${state.profile.email}`, created_by: state.user.id });
+      state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status: "approved", question: row.question, answer });
+      addedQid = id;
+    }
+
+    const { error } = await state.sb.from("rfp_rows").update({
+      answer: answer || null, include, status: "approved", added_qid: addedQid,
+      approved_by: state.user.id, approved_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    }).eq("id", row.id);
+    btn.classList.remove("is-loading"); btn.disabled = false;
+    if (error) { err.textContent = error.message; err.hidden = false; return; }
+
+    closeApproveModal();
+    toast(addedQid && addedQid !== row.added_qid ? `Approved — added ${addedQid} to the knowledge base` : "Answer approved");
+    if (addedQid) await loadQuestions();
+    await Promise.all([openRfp(row.rfp_id), loadRfpTodos()]);
+    renderUserBox();
+  }
+
+  // ---- finalise -----------------------------------------------------------
+  async function finaliseRfp() {
+    const p = state.currentRfp; if (!p) return;
+    const rows = state.currentRfpRows.filter(r => r.include && r.status !== "pending" && r.answer);
+    if (!confirm(`Finalise "${p.name}"? This writes ${rows.length} approved answers into the response document and records provenance. It can't be re-opened.`)) return;
+    const btn = $("#rfp-finalise"); btn.classList.add("is-loading"); btn.disabled = true;
+    try {
+      // 1) rebuild the workbook from the stored original
+      const dl = await state.sb.storage.from("rfps").download(p.storage_path);
+      if (dl.error) throw new Error("Couldn't fetch the original file: " + dl.error.message);
+      const wb = XLSX.read(await dl.data.arrayBuffer(), { type: "array" });
+      const ws = wb.Sheets[p.sheet_name];
+      if (!ws) throw new Error(`Sheet "${p.sheet_name}" not found in the stored file.`);
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: "" });
+      let writeCol = p.a_col;
+      if (writeCol == null || writeCol < 0) {
+        writeCol = aoa.reduce((m, r) => Math.max(m, r.length), 0);
+        XLSX.utils.sheet_add_aoa(ws, [["Cloudstaff Response"]], { origin: { r: p.header_row, c: writeCol } });
+      }
+      rows.forEach(r => XLSX.utils.sheet_add_aoa(ws, [[r.answer]], { origin: { r: r.row_idx, c: writeCol } }));
+      const ref = XLSX.utils.decode_range(ws["!ref"]);
+      if (writeCol > ref.e.c) { ref.e.c = writeCol; ws["!ref"] = XLSX.utils.encode_range(ref); }
+      const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+      const base = p.file_name.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
+      const outName = `${base} — Cloudstaff responses.xlsx`;
+
+      // 2) store the finalised copy, then hand it to the user
+      const finalPath = `${p.id}/final_${base.replace(/[^\w.\- ]+/g, "_")}.xlsx`;
+      const up = await state.sb.storage.from("rfps").upload(finalPath,
+        new Blob([out], { type: "application/octet-stream" }), { upsert: true });
+      if (up.error) throw new Error("Couldn't store the finalised file: " + up.error.message);
+      downloadBlob(new Blob([out], { type: "application/octet-stream" }), outName);
+
+      // 3) provenance: record which answer served each question
+      const provRows = rows.filter(r => r.added_qid || r.matched_qid).map(r => ({
+        question_id: r.added_qid || r.matched_qid,
+        source_name: `RFP: ${p.name}`,
+        source_ref: `${p.file_name} · row ${r.row_idx + 1}`,
+        client: p.name,
+        original_question: r.question,
+        original_answer: r.answer
+      }));
+      if (provRows.length) {
+        const pr = await state.sb.from("provenance").insert(provRows);
+        if (pr.error) toast("Provenance not recorded: " + pr.error.message, "danger");
+        else provRows.forEach(r => { state.provCounts[r.question_id] = (state.provCounts[r.question_id] || 0) + 1; });
+      }
+
+      // 4) mark finalised
+      const { error } = await state.sb.from("rfps").update({
+        status: "finalised", finalised_by: state.user.id,
+        finalised_at: new Date().toISOString(), finalised_path: finalPath
+      }).eq("id", p.id);
+      if (error) throw new Error(error.message);
+
+      toast(`Finalised — ${rows.length} answers written, provenance recorded`);
+      await openRfp(p.id);
+    } catch (e) {
+      toast(e.message || String(e), "danger");
     }
     btn.classList.remove("is-loading"); btn.disabled = false;
-    closeKbModal();
-    await loadQuestions();
-    toast(ok ? `Added ${ok} question${ok === 1 ? "" : "s"} to the knowledge base${fail ? ` (${fail} skipped)` : ""}` : "Nothing added", ok ? "success" : "danger");
-    renderImportStats(); renderImportRows();
+  }
+
+  async function downloadFinal() {
+    const p = state.currentRfp; if (!p || !p.finalised_path) return;
+    const dl = await state.sb.storage.from("rfps").download(p.finalised_path);
+    if (dl.error) return toast(dl.error.message, "danger");
+    const base = p.file_name.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
+    downloadBlob(dl.data, `${base} — Cloudstaff responses.xlsx`);
   }
 })();

@@ -80,6 +80,10 @@
           <i class="fa-solid fa-file-import fa-fw"></i>
           <span class="app-sidebar-label">New RFP</span>
         </a>
+        <a href="#/rfps" data-nav="rfps">
+          <i class="fa-solid fa-folder-open fa-fw"></i>
+          <span class="app-sidebar-label">RFP Responses</span>
+        </a>
       </nav>
       <footer class="app-sidebar-footer stack-sm">
         <div class="rfp-userbox">
@@ -186,6 +190,23 @@
               <div class="stat-tile stat-tile-illustrated">
                 <div class="stat-tile-body"><p class="stat-tile-label">Awaiting confirmation</p><p class="stat-tile-value" id="stat-due">0</p></div>
                 <div class="stat-tile-icon is-danger"><i class="fa-solid fa-clock"></i></div>
+              </div>
+            </div>
+
+            <div id="attest-rfp-wrap" class="stack-sm" hidden>
+              <h3>RFP answers waiting on you</h3>
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th style="width:14rem">RFP</th>
+                      <th>Question</th>
+                      <th style="width:8rem">Match</th>
+                      <th style="width:9rem" class="text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="attest-rfp-rows"></tbody>
+                </table>
               </div>
             </div>
 
@@ -310,9 +331,91 @@
                   <span class="text-secondary text-sm" id="import-action-sub"></span>
                 </div>
                 <div class="cluster cluster-sm">
-                  <button class="button button-secondary" id="import-download"><i class="fa-solid fa-file-excel"></i> Download filled spreadsheet</button>
-                  <button class="button button-primary" id="import-pushkb" hidden><i class="fa-solid fa-database"></i> Add gaps to knowledge base</button>
+                  <button class="button button-primary" id="import-create"><i class="fa-solid fa-folder-plus"></i> Create response project</button>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ---------- RFP RESPONSES (approval workflow) ---------- -->
+          <section id="rfps-view" class="stack-lg" hidden>
+            <div id="rfps-list-wrap" class="stack-lg">
+              <header class="rfp-page-head">
+                <div class="stack-2xs">
+                  <h1>RFP Responses</h1>
+                  <p class="text-secondary" id="rfps-summary">Response projects awaiting DRI approval, and finalised documents.</p>
+                </div>
+              </header>
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th style="width:16rem">File</th>
+                      <th style="width:8rem">Created</th>
+                      <th style="width:9rem">Approved</th>
+                      <th style="width:8.5rem">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rfps-rows"></tbody>
+                </table>
+              </div>
+              <div id="rfps-empty" class="empty-state" hidden>
+                <span class="empty-state-icon"><i class="fa-solid fa-folder-open"></i></span>
+                <h4>No response projects yet</h4>
+                <p>Upload a spreadsheet in <strong>New RFP</strong> and create a response project from it.</p>
+              </div>
+            </div>
+
+            <div id="rfp-detail-wrap" class="stack-lg" hidden>
+              <header class="rfp-page-head">
+                <div class="stack-2xs">
+                  <div class="cluster cluster-sm">
+                    <button class="button button-tertiary button-sm" id="rfp-back"><i class="fa-solid fa-arrow-left"></i> All RFPs</button>
+                    <span id="rfp-detail-status"></span>
+                  </div>
+                  <h1 id="rfp-detail-name">—</h1>
+                  <p class="text-secondary text-sm" id="rfp-detail-sub">—</p>
+                </div>
+                <div class="cluster cluster-sm">
+                  <button class="button button-secondary" id="rfp-download-final" hidden><i class="fa-solid fa-file-excel"></i> Download response</button>
+                  <button class="button button-primary" id="rfp-finalise" hidden><i class="fa-solid fa-file-signature"></i> Finalise and write Response</button>
+                </div>
+              </header>
+
+              <div class="grid-4 rfp-stats">
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Questions</p><p class="stat-tile-value" id="rfp-stat-total">0</p></div>
+                  <div class="stat-tile-icon is-brand"><i class="fa-solid fa-list-ol"></i></div>
+                </div>
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Auto-approved</p><p class="stat-tile-value" id="rfp-stat-auto">0</p></div>
+                  <div class="stat-tile-icon is-success"><i class="fa-solid fa-bolt"></i></div>
+                </div>
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">DRI approved</p><p class="stat-tile-value" id="rfp-stat-approved">0</p></div>
+                  <div class="stat-tile-icon is-success"><i class="fa-solid fa-user-check"></i></div>
+                </div>
+                <div class="stat-tile stat-tile-illustrated">
+                  <div class="stat-tile-body"><p class="stat-tile-label">Awaiting approval</p><p class="stat-tile-value" id="rfp-stat-pending">0</p></div>
+                  <div class="stat-tile-icon is-warning"><i class="fa-solid fa-hourglass-half"></i></div>
+                </div>
+              </div>
+
+              <div class="table-wrap rfp-table-wrap">
+                <table class="table rfp-import-table">
+                  <thead>
+                    <tr>
+                      <th style="width:3rem">#</th>
+                      <th style="width:30%">RFP question</th>
+                      <th style="width:9rem">Match</th>
+                      <th>Answer</th>
+                      <th style="width:11rem">Assigned to</th>
+                      <th style="width:11rem" class="text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rfp-detail-rows"></tbody>
+                </table>
               </div>
             </div>
           </section>
@@ -381,19 +484,66 @@
     </div>
   </div>
 
-  <!-- ===================== ADD-TO-KB MODAL ===================== -->
-  <div class="rfp-overlay" id="kb-overlay" hidden>
-    <div class="rfp-overlay-backdrop" data-kb-close></div>
-    <div class="modal modal-lg rfp-modal rfp-kb-modal" role="dialog" aria-label="Add to knowledge base">
+  <!-- ===================== CREATE RESPONSE PROJECT MODAL ===================== -->
+  <div class="rfp-overlay" id="create-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-create-close></div>
+    <div class="modal modal-lg rfp-modal rfp-kb-modal" role="dialog" aria-label="Create response project">
       <header class="modal-header">
-        <h3>Add new questions to the knowledge base</h3>
-        <button class="modal-close" data-kb-close aria-label="Close">×</button>
+        <h3>Create response project</h3>
+        <button class="modal-close" data-create-close aria-label="Close">×</button>
       </header>
-      <div class="modal-body stack-md" id="kb-body"><!-- filled by JS --></div>
-      <div id="kb-error" class="field-error" hidden style="padding:0 var(--space-lg)"></div>
+      <div class="modal-body stack-md">
+        <div class="field">
+          <label class="field-label" for="create-name">Project name</label>
+          <input class="input" id="create-name" placeholder="e.g. Sophos Contact Centre RFP">
+        </div>
+        <div id="create-auto-note" class="alert alert-success banner-inline">
+          <i class="alert-icon fa-solid fa-bolt"></i><span></span>
+        </div>
+        <div class="stack-2xs">
+          <h4>Assign a DRI to each remaining question</h4>
+          <p class="text-secondary text-sm">These answers need a DRI to write or approve them before the response can be finalised. Assigned DRIs see them in <strong>My To Do</strong>.</p>
+        </div>
+        <div id="create-assign-list" class="stack-sm"><!-- filled by JS --></div>
+        <div id="create-error" class="field-error" hidden></div>
+      </div>
       <footer class="modal-footer">
-        <button class="button button-tertiary" data-kb-close>Cancel</button>
-        <button class="button button-primary" id="kb-save"><i class="fa-solid fa-database"></i> Add selected</button>
+        <button class="button button-tertiary" data-create-close>Cancel</button>
+        <button class="button button-primary" id="create-save"><i class="fa-solid fa-folder-plus"></i> Create project</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ===================== REVIEW / APPROVE ROW MODAL ===================== -->
+  <div class="rfp-overlay" id="approve-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-approve-close></div>
+    <div class="modal modal-md rfp-modal" role="dialog" aria-label="Review answer">
+      <header class="modal-header">
+        <h3>Review answer</h3>
+        <button class="modal-close" data-approve-close aria-label="Close">×</button>
+      </header>
+      <div class="modal-body stack-md">
+        <div class="stack-2xs">
+          <p id="approve-question" class="rfp-answer"></p>
+          <p class="text-secondary text-sm" id="approve-matchinfo"></p>
+        </div>
+        <div class="field">
+          <label class="field-label" for="approve-answer">Answer to send</label>
+          <textarea class="textarea" id="approve-answer" rows="7"></textarea>
+        </div>
+        <label class="check"><input type="checkbox" id="approve-include" checked> Include this answer in the response document</label>
+        <div id="approve-kb-block" class="stack-sm" hidden>
+          <label class="check"><input type="checkbox" id="approve-addkb"> Also add this question &amp; answer to the knowledge base</label>
+          <div class="cluster cluster-sm" id="approve-kb-fields" hidden>
+            <div class="field flex-1"><label class="field-label">Category</label><select class="select" id="approve-kb-cat"></select></div>
+            <div class="field"><label class="field-label">Tier</label><select class="select" id="approve-kb-tier"><option>Client</option><option>Internal</option></select></div>
+          </div>
+        </div>
+        <div id="approve-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-approve-close>Cancel</button>
+        <button class="button button-success" id="approve-save"><i class="fa-solid fa-check"></i> Approve answer</button>
       </footer>
     </div>
   </div>

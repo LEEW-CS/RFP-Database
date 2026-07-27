@@ -148,3 +148,10 @@
   .rfp-kb-item { padding: var(--space-md); }
   .rfp-kb-item + .rfp-kb-item { margin-top: var(--space-sm); }
 }
+
+/* v0.6.0 — response projects */
+@layer app {
+  .rfp-assign-q { margin: var(--space-2xs) 0 var(--space-xs); }
+  .rfp-detail-ans { max-width: 26rem; }
+  #rfps-rows tr { cursor: pointer; }
+}
