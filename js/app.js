@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.8.0";
+  const APP_VERSION = "v0.8.1";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -1276,12 +1276,22 @@
       state.sb.from("sources").select("name,kind,tier,source_date"),
       state.sb.from("rfps").select("name,status,finalised_at")
     ]);
-    const counts = {};
-    (prov.data || []).forEach(r => { counts[r.source_name] = (counts[r.source_name] || 0) + 1; });
-    const names = Object.keys(counts).sort((a, b) => a.localeCompare(b));
+    // Phase-0 provenance often stores per-row source names ("AI Q&A DB AIQA-CP-10"),
+    // so roll rows up under the longest matching name from the sources table.
+    const srcList = (srcs.data || []).slice().sort((a, b) => b.name.length - a.name.length);
+    const groups = {};   // label -> { count, src, key }
+    (prov.data || []).forEach(r => {
+      const src = srcList.find(s => r.source_name.startsWith(s.name));
+      const label = src ? src.name : r.source_name;
+      const g = groups[label] || (groups[label] = { count: 0, src, key: src ? { like: src.name + "%" } : { eq: r.source_name } });
+      g.count++;
+    });
+    const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
     const tb = $("#history-rows"); tb.innerHTML = "";
     names.forEach(nm => {
-      const src = (srcs.data || []).find(s => nm.startsWith(s.name));
+      const g = groups[nm];
+      const src = g.src;
+      const counts = { [nm]: g.count };
       const proj = nm.startsWith("RFP: ") ? (rfps.data || []).find(p => "RFP: " + p.name === nm) : null;
       const kind = proj
         ? `<span class="badge badge-brand badge-sm">Response project</span>`
@@ -1294,9 +1304,9 @@
         `<td class="text-right"></td>`;
       const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
       const view = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-eye"></i> View Q&A');
-      view.addEventListener("click", () => openHistory(nm));
+      view.addEventListener("click", () => openHistory(nm, g.key));
       const dl = el("button", "button button-primary button-sm", '<i class="fa-solid fa-file-excel"></i> Excel');
-      dl.addEventListener("click", async () => { await openHistory(nm, true); exportHistoryExcel(); });
+      dl.addEventListener("click", async () => { await openHistory(nm, g.key, true); exportHistoryExcel(); });
       actions.append(view, dl);
       tr.lastChild.appendChild(actions);
       tb.appendChild(tr);
@@ -1306,10 +1316,11 @@
       : "Every RFP the builder knows about — historical sources and finalised responses.";
   }
 
-  async function openHistory(name, silent) {
-    const { data, error } = await state.sb.from("provenance")
-      .select("question_id,source_ref,original_question,original_answer")
-      .eq("source_name", name).order("id").range(0, 9999);
+  async function openHistory(name, key, silent) {
+    let q = state.sb.from("provenance")
+      .select("question_id,source_name,source_ref,original_question,original_answer");
+    q = (key && key.like) ? q.like("source_name", key.like) : q.eq("source_name", (key && key.eq) || name);
+    const { data, error } = await q.order("id").range(0, 9999);
     if (error) { toast(error.message, "danger"); return; }
     state.currentHistory = name;
     state.currentHistoryRows = data || [];
