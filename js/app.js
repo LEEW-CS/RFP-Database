@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.12.0";
+  const APP_VERSION = "v0.13.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -704,6 +704,7 @@
     $("#resdel-confirm").addEventListener("click", confirmAssetDelete);
     $("#rfp-finalise").addEventListener("click", finaliseRfp);
     $("#rfp-download-final").addEventListener("click", downloadFinal);
+    $("#rfp-download-final-doc").addEventListener("click", downloadFinalDoc);
   }
 
   function renderImport() {
@@ -1128,6 +1129,7 @@
     $("#rfp-stat-pending").textContent = pending;
     $("#rfp-finalise").hidden = !(canManage && !fin && pending === 0 && included.length > 0);
     $("#rfp-download-final").hidden = !(fin && p.finalised_path);
+    $("#rfp-download-final-doc").hidden = !(fin && p.finalised_path);
 
     const tb = $("#rfp-detail-rows"); tb.innerHTML = "";
     rows.forEach(r => {
@@ -1254,6 +1256,18 @@
       if (up.error) throw new Error("Couldn't store the finalised file: " + up.error.message);
       downloadBlob(new Blob([out], { type: "application/octet-stream" }), outName);
 
+      // 2b) branded Word response document (v0.13.0) — best-effort alongside the workbook
+      try {
+        if (!window.CS_WORD || !window.docx) throw new Error("Word library not loaded — check your connection and reload.");
+        const docBlob = await window.CS_WORD.buildResponseBlob(p, rows);
+        const docPath = finalPath.replace(/\.xlsx$/i, ".docx");
+        const upDoc = await state.sb.storage.from("rfps").upload(docPath, docBlob, { upsert: true });
+        if (upDoc.error) toast("Word document not stored: " + upDoc.error.message, "danger");
+        downloadBlob(docBlob, `${base} — Cloudstaff response.docx`);
+      } catch (we) {
+        toast("Word document couldn't be generated: " + (we.message || we), "danger");
+      }
+
       // 3) provenance: record which answer served each question
       const provRows = rows.filter(r => r.added_qid || r.matched_qid).map(r => ({
         question_id: r.added_qid || r.matched_qid,
@@ -1291,6 +1305,15 @@
     if (dl.error) return toast(dl.error.message, "danger");
     const base = p.file_name.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
     downloadBlob(dl.data, `${base} — Cloudstaff responses.xlsx`);
+  }
+
+  async function downloadFinalDoc() {
+    const p = state.currentRfp; if (!p || !p.finalised_path) return;
+    const docPath = p.finalised_path.replace(/\.xlsx$/i, ".docx");
+    const dl = await state.sb.storage.from("rfps").download(docPath);
+    if (dl.error) return toast("No Word document is stored for this project — it was finalised before v0.13.0.", "danger");
+    const base = p.file_name.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
+    downloadBlob(dl.data, `${base} — Cloudstaff response.docx`);
   }
 
   /* ========================================================================

@@ -19,7 +19,10 @@ page and sidebar).
   auto-matched against the knowledge base (TF-IDF). Strong untouched matches
   auto-approve; everything else is assigned to a DRI who writes/approves the
   answer. When nothing is pending, **Finalise and write Response** produces the
-  filled document, stores it, and records provenance for every answer used.
+  filled workbook **and a branded Word response document** (Cloudstaff template:
+  engagement-model introduction, the RFP's Q&As, and standard boilerplate
+  sections, with the client name merged throughout), stores both, and records
+  provenance for every answer used.
 - **Accountability** — the **Team Board** shows everyone, per active RFP, who is
   holding which answers, plus each person's outstanding knowledge-base upkeep
   (write / rework / monthly confirm). Public to all signed-in users by design.
@@ -57,12 +60,13 @@ index.html    app shell, login, all views, drawer + modals, inline logo sprite
 css/app.css   app-layer overrides on top of the design system
 js/config.js  Supabase URL + anon key
 js/match.js   dependency-free TF-IDF question matcher (Node-testable)
+js/worddoc.js branded Word response document (Finalise)
 js/app.js     all application logic (APP_VERSION lives here)
 ```
 
 CDN scripts (order matters): supabase-js@2 → SheetJS 0.18.5 (spreadsheet
-parse/fill) → ExcelJS 4.4.0 (styled History exports) → config → match.js →
-app.js.
+parse/fill) → ExcelJS 4.4.0 (styled History exports) → docx 9.6.1 (branded Word
+response at Finalise) → config → match.js → worddoc.js → app.js.
 
 ## Roles
 

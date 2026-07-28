@@ -425,6 +425,7 @@
                 </div>
                 <div class="cluster cluster-sm">
                   <button class="button button-secondary" id="rfp-download-final" hidden><i class="fa-solid fa-file-excel"></i> Download response</button>
+                  <button class="button button-secondary" id="rfp-download-final-doc" hidden><i class="fa-solid fa-file-word"></i> Download Word doc</button>
                   <button class="button button-primary" id="rfp-finalise" hidden><i class="fa-solid fa-file-signature"></i> Finalise and write Response</button>
                 </div>
               </header>
@@ -885,8 +886,11 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <!-- ExcelJS (styled Cloudstaff-formatted exports for RFP History) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <!-- docx (branded Word response document at Finalise, v0.13.0) -->
+  <script src="https://cdn.jsdelivr.net/npm/docx@9.6.1/dist/index.iife.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/match.js"></script>
+  <script src="js/worddoc.js"></script>
   <script src="js/app.js" defer></script>
 </body>
 </html>
