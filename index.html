@@ -726,6 +726,17 @@
             <div class="field flex-1"><label class="field-label">Category</label><select class="select" id="approve-kb-cat"></select></div>
             <div class="field"><label class="field-label">Tier</label><select class="select" id="approve-kb-tier"><option>Client</option><option>Internal</option></select></div>
           </div>
+          <div class="stack-sm" id="approve-kb-generic" hidden>
+            <div class="field">
+              <label class="field-label" for="approve-kb-question">Question to save <span class="text-secondary">(client names removed)</span></label>
+              <textarea class="textarea" id="approve-kb-question" rows="2"></textarea>
+            </div>
+            <div class="field">
+              <label class="field-label" for="approve-kb-answer">Answer to save <span class="text-secondary">(client names removed)</span></label>
+              <textarea class="textarea" id="approve-kb-answer" rows="6"></textarea>
+            </div>
+            <button type="button" class="button button-tertiary button-sm" id="approve-kb-regen"><i class="fa-solid fa-rotate"></i> Re-strip from the answer above</button>
+          </div>
           <p class="text-secondary text-sm" id="approve-kb-hint"></p>
         </div>
         <div id="approve-error" class="field-error" hidden></div>
@@ -934,7 +945,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- ExcelJS (styled Cloudstaff-formatted exports for RFP History) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <!-- docx (branded Word response document at Finalise, v0.15.0) -->
+  <!-- docx (branded Word response document at Finalise, v0.16.0) -->
   <script src="https://cdn.jsdelivr.net/npm/docx@9.6.1/dist/index.iife.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/match.js"></script>
