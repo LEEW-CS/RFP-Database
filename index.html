@@ -737,6 +737,37 @@
     </div>
   </div>
 
+  <!-- ===================== REDIRECT QUESTION MODAL ===================== -->
+  <div class="rfp-overlay" id="redirect-overlay" hidden>
+    <div class="rfp-overlay-backdrop" data-redirect-close></div>
+    <div class="modal modal-sm rfp-modal" role="dialog" aria-label="Redirect question">
+      <header class="modal-header">
+        <h3>Redirect question</h3>
+        <button class="modal-close" data-redirect-close aria-label="Close">&times;</button>
+      </header>
+      <div class="modal-body stack-md">
+        <div class="stack-2xs">
+          <p id="redirect-question" class="rfp-answer"></p>
+          <p class="text-secondary text-sm" id="redirect-current"></p>
+        </div>
+        <div class="field">
+          <label class="field-label" for="redirect-to">Redirect to</label>
+          <select class="select" id="redirect-to"></select>
+          <p class="field-hint text-secondary text-sm">Only editors and admins are listed — a viewer couldn't approve the answer.</p>
+        </div>
+        <div class="field">
+          <label class="field-label" for="redirect-note">Why isn't this yours? (optional)</label>
+          <textarea class="textarea" id="redirect-note" rows="3" placeholder="e.g. This is a legal entity question — belongs with Finance, not IT Security."></textarea>
+        </div>
+        <div id="redirect-error" class="field-error" hidden></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="button button-tertiary" data-redirect-close>Cancel</button>
+        <button class="button button-primary" id="redirect-save"><i class="fa-solid fa-share"></i> Redirect</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- ===================== ADD LIBRARY RESOURCE MODAL ===================== -->
   <div class="rfp-overlay" id="res-overlay" hidden>
     <div class="rfp-overlay-backdrop" data-res-close></div>
@@ -903,7 +934,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- ExcelJS (styled Cloudstaff-formatted exports for RFP History) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <!-- docx (branded Word response document at Finalise, v0.14.0) -->
+  <!-- docx (branded Word response document at Finalise, v0.15.0) -->
   <script src="https://cdn.jsdelivr.net/npm/docx@9.6.1/dist/index.iife.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/match.js"></script>
