@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.13.0";
+  const APP_VERSION = "v0.15.1";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -66,8 +66,8 @@
     rfpTodos: [],       // pending rfp_rows assigned to me
     approveRow: null,   // row open in the approve modal
     approveAssets: [],  // assets attached to that row (v0.14.0)
-    redirectRow: null,  // row open in the redirect modal (v0.15.0)
-    rfpReassign: {},    // rfp_row_id -> latest reassignment (v0.15.0)
+    redirectRow: null,  // row open in the redirect modal (v0.15.1)
+    rfpReassign: {},    // rfp_row_id -> latest reassignment (v0.15.1)
     currentHistory: null, currentHistoryRows: [],   // RFP History detail
     resSection: null,   // section being added to in the Library modal
     resEditing: null,   // resource open in the edit modal (null = adding new)
@@ -93,17 +93,33 @@
   }
 
   document.addEventListener("DOMContentLoaded", async () => {
-    initTheme(); setVersion(); wireStaticHandlers();
-    if (!configured) { $("#config-warning").hidden = false; showLogin(); return; }
+    initTheme(); setVersion();
+    // The Supabase client is created BEFORE any UI wiring. A missing element in
+    // a stale cached index.html used to throw here and leave state.sb null, so
+    // the sign-in form did nothing at all — never let that lock anyone out again.
+    if (!configured) { $("#config-warning").hidden = false; wireLoginOnly(); showLogin(); return; }
     state.sb = supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+    try {
+      wireStaticHandlers();
+    } catch (e) {
+      console.error("UI wiring failed — signing in still works, but reload with cache cleared:", e);
+      wireLoginOnly();
+    }
     const { data: { session } } = await state.sb.auth.getSession();
     if (session) await onSignedIn(session.user); else showLogin();
   });
 
+  // Minimal fallback so the login form is always live, whatever else breaks.
+  function wireLoginOnly() {
+    const f = $("#login-form");
+    if (f && !f.dataset.wired) { f.addEventListener("submit", onLogin); f.dataset.wired = "1"; }
+  }
+
   function showLogin() { $("#login-view").hidden = false; $("#app-shell").hidden = true; }
 
   function wireStaticHandlers() {
-    $("#login-form").addEventListener("submit", onLogin);
+    const lf = $("#login-form");
+    if (lf && !lf.dataset.wired) { lf.addEventListener("submit", onLogin); lf.dataset.wired = "1"; }
     $("#signout-btn").addEventListener("click", async () => { await state.sb.auth.signOut(); location.reload(); });
     $("[data-collapse]").addEventListener("click", () => $(".app-sidebar").classList.toggle("is-collapsed"));
     $$("[data-drawer-close]").forEach(b => b.addEventListener("click", closeDrawer));
@@ -128,7 +144,17 @@
     err.hidden = true; btn.classList.add("is-loading"); btn.disabled = true;
     const { data, error } = await state.sb.auth.signInWithPassword({ email: $("#email").value.trim(), password: $("#password").value });
     btn.classList.remove("is-loading"); btn.disabled = false;
-    if (error) { err.textContent = error.message; err.hidden = false; return; }
+    if (error) {
+      // Belt and braces: the inline element depends on design-system styling
+      // that may keep it hidden, and a silent failure here is what locked the
+      // tool up for a day. A toast is guaranteed to be seen.
+      err.textContent = error.message;
+      err.hidden = false;
+      err.style.display = "block";
+      toast(error.message, "danger");
+      console.warn("Sign-in refused:", error.status || "", error.message);
+      return;
+    }
     await onSignedIn(data.user);
   }
 
@@ -693,7 +719,7 @@
     $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
     wireApproveAssetPicker();
     $$("[data-redirect-close]").forEach(b => b.addEventListener("click", closeRedirectModal));
-    $("#redirect-save").addEventListener("click", saveRedirect);
+    { const n = $("#redirect-save"); if (n) n.addEventListener("click", saveRedirect); }
     $("#rfp-back").addEventListener("click", () => { state.currentRfp = null; renderRfps(); });
     $("#history-select").addEventListener("change", () => openHistory($("#history-select").value));
     $("#history-sort").addEventListener("change", () => renderHistory());
@@ -1172,7 +1198,7 @@
     });
   }
 
-  // ---- redirect: hand a question to someone better placed (v0.15.0) -------
+  // ---- redirect: hand a question to someone better placed (v0.15.1) -------
   // A DRI who opens an assigned question and legitimately says "this isn't
   // mine" can pass it on directly. The handover is logged with a reason so the
   // next owner knows why it reached them, and so a question can't quietly
