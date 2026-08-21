@@ -436,8 +436,8 @@
                   <div class="stat-tile-icon is-brand"><i class="fa-solid fa-list-ol"></i></div>
                 </div>
                 <div class="stat-tile stat-tile-illustrated">
-                  <div class="stat-tile-body"><p class="stat-tile-label">Auto-approved</p><p class="stat-tile-value" id="rfp-stat-auto">0</p></div>
-                  <div class="stat-tile-icon is-success"><i class="fa-solid fa-bolt"></i></div>
+                  <div class="stat-tile-body"><p class="stat-tile-label">Excluded</p><p class="stat-tile-value" id="rfp-stat-auto">0</p></div>
+                  <div class="stat-tile-icon is-neutral"><i class="fa-solid fa-minus"></i></div>
                 </div>
                 <div class="stat-tile stat-tile-illustrated">
                   <div class="stat-tile-body"><p class="stat-tile-label">DRI approved</p><p class="stat-tile-value" id="rfp-stat-approved">0</p></div>
@@ -705,12 +705,28 @@
           <textarea class="textarea" id="approve-answer" rows="7"></textarea>
         </div>
         <label class="check"><input type="checkbox" id="approve-include" checked> Include this answer in the response document</label>
-        <div id="approve-kb-block" class="stack-sm" hidden>
-          <label class="check"><input type="checkbox" id="approve-addkb"> Also add this question &amp; answer to the knowledge base</label>
+
+        <div class="stack-sm rfp-approve-block">
+          <div class="cluster" style="justify-content:space-between">
+            <h4 class="text-sm">Attachments <span class="badge badge-neutral badge-sm" id="approve-asset-count">0</span></h4>
+            <button type="button" class="button button-secondary button-sm" id="approve-asset-add-btn"><i class="fa-solid fa-paperclip"></i> Add assets</button>
+          </div>
+          <div id="approve-assets"></div>
+          <div id="approve-asset-picker" class="cluster cluster-sm" hidden>
+            <select class="select select-sm" id="approve-asset-cat" style="max-width:12rem"><option value="">— Category —</option></select>
+            <select class="select select-sm flex-1" id="approve-asset-item" disabled><option value="">— Pick an asset —</option></select>
+            <button type="button" class="button button-primary button-sm" id="approve-asset-confirm" disabled><i class="fa-solid fa-plus"></i> Attach</button>
+          </div>
+          <p class="text-secondary text-sm">Files are bundled into a ZIP that accompanies the response. Videos are referenced as links rather than bundled.</p>
+        </div>
+
+        <div id="approve-kb-block" class="stack-sm rfp-approve-block">
+          <label class="check"><input type="checkbox" id="approve-addkb"> Save this answer to the knowledge base as a new Q&amp;A</label>
           <div class="cluster cluster-sm" id="approve-kb-fields" hidden>
             <div class="field flex-1"><label class="field-label">Category</label><select class="select" id="approve-kb-cat"></select></div>
             <div class="field"><label class="field-label">Tier</label><select class="select" id="approve-kb-tier"><option>Client</option><option>Internal</option></select></div>
           </div>
+          <p class="text-secondary text-sm" id="approve-kb-hint"></p>
         </div>
         <div id="approve-error" class="field-error" hidden></div>
       </div>
@@ -884,9 +900,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- SheetJS (spreadsheet parse + export for the New RFP workflow) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- ExcelJS (styled Cloudstaff-formatted exports for RFP History) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <!-- docx (branded Word response document at Finalise, v0.13.0) -->
+  <!-- docx (branded Word response document at Finalise, v0.14.0) -->
   <script src="https://cdn.jsdelivr.net/npm/docx@9.6.1/dist/index.iife.min.js"></script>
   <script src="js/config.js"></script>
   <script src="js/match.js"></script>
