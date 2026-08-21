@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const APP_VERSION = "v0.15.1";
+  const APP_VERSION = "v0.16.0";
 
   const cfg = window.RFP_CONFIG || {};
   const configured =
@@ -68,6 +68,7 @@
     approveAssets: [],  // assets attached to that row (v0.14.0)
     redirectRow: null,  // row open in the redirect modal (v0.15.1)
     rfpReassign: {},    // rfp_row_id -> latest reassignment (v0.15.1)
+    clients: [],        // client names, used to genericise write-backs (v0.16.0)
     currentHistory: null, currentHistoryRows: [],   // RFP History detail
     resSection: null,   // section being added to in the Library modal
     resEditing: null,   // resource open in the edit modal (null = adding new)
@@ -716,7 +717,13 @@
     $("#import-create").addEventListener("click", openCreateModal);
     $("#create-save").addEventListener("click", saveCreateProject);
     $("#approve-save").addEventListener("click", saveApprove);
-    $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
+    $("#approve-addkb").addEventListener("change", () => {
+      const on = $("#approve-addkb").checked;
+      $("#approve-kb-fields").hidden = !on;
+      $("#approve-kb-generic").hidden = !on;
+      if (on) refreshKbGeneric();
+    });
+    { const n = $("#approve-kb-regen"); if (n) n.addEventListener("click", refreshKbGeneric); }
     wireApproveAssetPicker();
     $$("[data-redirect-close]").forEach(b => b.addEventListener("click", closeRedirectModal));
     { const n = $("#redirect-save"); if (n) n.addEventListener("click", saveRedirect); }
@@ -1204,6 +1211,12 @@
   // next owner knows why it reached them, and so a question can't quietly
   // circulate without anyone owning it.
 
+  async function loadClients() {
+    if (state.clients && state.clients.length) return;
+    const { data } = await state.sb.from("clients").select("name");
+    state.clients = data || [];
+  }
+
   async function loadReassignments(rows) {
     state.rfpReassign = {};
     const ids = (rows || []).map(r => r.id);
@@ -1264,6 +1277,82 @@
   // v0.14.0: the reviewer can edit the answer, attach supporting assets, and
   // bank the customised answer back into the knowledge base as a new Q&A.
 
+  // ---- genericising a customised answer for the knowledge base (v0.16.0) --
+  // An answer written for one client is nearly useless as a canonical entry:
+  // it names that client, so it will never match anything again. Before it is
+  // banked we strip the client's name back to "the client". The reviewer sees
+  // and can edit the result — this never rewrites anything silently.
+
+  // Words that appear inside company names but are far too common to strip on
+  // their own — removing these would mangle unrelated sentences.
+  const GENERIC_WORDS = new Set([
+    "group","holdings","limited","company","partners","specialty","speciality",
+    "insurance","financial","finance","energy","property","technology","technologies",
+    "services","service","solutions","global","international","national","australia",
+    "australian","brokers","broking","capital","health","medical","digital","media",
+    "bank","banking","retail","logistics","travel","tours","cloudstaff",
+    "followup","follow","final","draft","copy","response","responses","questions",
+    "rfp","rfi","rfq","tender","proposal","questionnaire","master","version"
+  ]);
+
+  function buildClientTerms() {
+    const raw = [];
+    if (state.currentRfp) { raw.push(state.currentRfp.name); raw.push(state.currentRfp.file_name); }
+    (state.clients || []).forEach(c => raw.push(c.name));
+    const terms = new Set();
+    raw.forEach(n => {
+      const clean = String(n || "")
+        .replace(/\.(xlsx|xlsm|xls|csv|docx|pdf)$/i, "")
+        .replace(/[_\-]+/g, " ")
+        .replace(/\b(pty|ltd|inc|llc|plc|gmbh|nv|bv|sa|srl|corp|corporation|co)\b\.?/gi, " ")
+        .replace(/\s+/g, " ").trim();
+      if (!clean) return;
+      // the full phrase first, so "Fusion Specialty Group" beats "Fusion"
+      const words = clean.split(" ").filter(Boolean);
+      const meaningful = words.filter(w => !GENERIC_WORDS.has(w.toLowerCase()));
+      if (words.length > 1 && meaningful.length) terms.add(words.join(" "));
+      meaningful.forEach(w => { if (w.length >= 4) terms.add(w); });
+    });
+    return [...terms].sort((a, b) => b.length - a.length);   // longest match wins
+  }
+
+  function genericise(text, terms) {
+    let out = String(text || ""), hits = 0;
+    const seen = new Set();
+    terms.forEach(t => {
+      const re = new RegExp("\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:['\u2019]s)?\\b", "gi");
+      const src = out;
+      out = src.replace(re, (m, off) => {
+        hits++; seen.add(t.toLowerCase().split(" ")[0]);
+        const poss = /['\u2019]s$/.test(m);
+        const before = src.slice(0, off).replace(/\s+$/, "");
+        const sentenceStart = before === "" || /[.!?:]$/.test(before);
+        return (sentenceStart ? "The client" : "the client") + (poss ? "\u2019s" : "");
+      });
+    });
+    out = out.replace(/\b(the client)(\s+the client)+\b/gi, "$1");        // collapse repeats
+    return { text: out, hits, distinct: seen.size };
+  }
+
+  function refreshKbGeneric() {
+    const row = state.approveRow; if (!row) return;
+    const terms = buildClientTerms();
+    const q = genericise(row.question, terms);
+    const a = genericise($("#approve-answer").value, terms);
+    $("#approve-kb-question").value = q.text;
+    $("#approve-kb-answer").value = a.text;
+    const hits = q.hits + a.hits;
+    const many = Math.max(q.distinct, a.distinct) > 1;
+    const lineage = row.matched_qid ? ` Linked to ${row.matched_qid}.` : "";
+    const hint = $("#approve-kb-hint");
+    hint.textContent = !hits
+      ? `No client names detected — check the text above is generic enough to match a future RFP.${lineage}`
+      : many
+        ? `${hits} references to more than one client were all replaced with "the client", which may now read wrongly — this often happens with reference lists. Reword before approving.${lineage}`
+        : `${hits} client reference${hits === 1 ? "" : "s"} replaced with "the client". Check the wording reads naturally before approving.${lineage}`;
+    hint.className = many ? "text-warning text-sm" : "text-secondary text-sm";
+  }
+
   const kbAnswerFor = (qid) => { const q = state.questions.find(x => x.id === qid); return q ? (q.answer || "") : ""; };
 
   function openApproveModal(row) {
@@ -1290,9 +1379,8 @@
       const drifted = !row.matched_qid || ($("#approve-answer").value.trim() !== kbAnswerFor(row.matched_qid).trim());
       $("#approve-addkb").checked = drifted;
       $("#approve-kb-fields").hidden = !drifted;
-      $("#approve-kb-hint").textContent = row.matched_qid
-        ? `Saved as a new question linked to ${row.matched_qid}, with any attachments carried across — so this more specific wording is matchable next time.`
-        : "Saved as a new question so this answer is matchable next time.";
+      $("#approve-kb-generic").hidden = !drifted;
+      loadClients().then(() => { if ($("#approve-addkb").checked) refreshKbGeneric(); });
     } else kbBlock.hidden = true;
 
     $("#approve-error").hidden = true;
@@ -1412,8 +1500,16 @@
     // answer already exist verbatim reuses that entry instead of duplicating.
     let addedQid = row.added_qid || null;
     if (!$("#approve-kb-block").hidden && $("#approve-addkb").checked && answer) {
+      // Bank the generic wording the reviewer approved, never the client copy.
+      const kbQuestion = ($("#approve-kb-question").value || row.question).trim();
+      const kbAnswer   = ($("#approve-kb-answer").value   || answer).trim();
+      if (!kbQuestion || !kbAnswer) {
+        btn.classList.remove("is-loading"); btn.disabled = false;
+        err.textContent = "The knowledge-base question and answer can't be blank — untick the save option or fill them in.";
+        err.hidden = false; return;
+      }
       const norm = (t) => (t || "").toLowerCase().replace(/\s+/g, " ").trim();
-      const dupe = state.questions.find(q => norm(q.question) === norm(row.question) && norm(q.answer) === norm(answer));
+      const dupe = state.questions.find(q => norm(q.question) === norm(kbQuestion) && norm(q.answer) === norm(kbAnswer));
       if (dupe) {
         addedQid = dupe.id;
       } else {
@@ -1422,16 +1518,16 @@
         const id = nextIdForCategory(catId);
         const src = `RFP response · ${state.currentRfp ? state.currentRfp.name : "RFP"} · ${new Date().toISOString().slice(0, 10)}`;
         const q1 = await state.sb.from("canonical_questions").insert({
-          id, category_id: catId, question: row.question, tier, status: "approved",
+          id, category_id: catId, question: kbQuestion, tier, status: "approved",
           needs_rework: false, sample_only: false, variant_of: row.matched_qid || null
         });
         if (q1.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = q1.error.message; err.hidden = false; return; }
-        await state.sb.from("canonical_answers").insert({ question_id: id, answer, answer_source: src, updated_by: state.user.id });
-        await state.sb.from("answer_versions").insert({ question_id: id, answer, answer_source: src, note: `Approved in RFP response by ${state.profile.email}`, created_by: state.user.id });
+        await state.sb.from("canonical_answers").insert({ question_id: id, answer: kbAnswer, answer_source: src, updated_by: state.user.id });
+        await state.sb.from("answer_versions").insert({ question_id: id, answer: kbAnswer, answer_source: src, note: `Genericised from RFP response, approved by ${state.profile.email}`, created_by: state.user.id });
         // carry the attachments across so the evidence travels with the answer
         const assets = (state.approveAssets || []).map(r => ({ question_id: id, resource_id: r.id }));
         if (assets.length) await state.sb.from("question_resources").insert(assets);
-        state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status: "approved", question: row.question, answer, variant_of: row.matched_qid || null });
+        state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status: "approved", question: kbQuestion, answer: kbAnswer, variant_of: row.matched_qid || null });
         addedQid = id;
       }
     }
