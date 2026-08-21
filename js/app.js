@@ -66,6 +66,8 @@
     rfpTodos: [],       // pending rfp_rows assigned to me
     approveRow: null,   // row open in the approve modal
     approveAssets: [],  // assets attached to that row (v0.14.0)
+    redirectRow: null,  // row open in the redirect modal (v0.15.0)
+    rfpReassign: {},    // rfp_row_id -> latest reassignment (v0.15.0)
     currentHistory: null, currentHistoryRows: [],   // RFP History detail
     resSection: null,   // section being added to in the Library modal
     resEditing: null,   // resource open in the edit modal (null = adding new)
@@ -690,6 +692,8 @@
     $("#approve-save").addEventListener("click", saveApprove);
     $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
     wireApproveAssetPicker();
+    $$("[data-redirect-close]").forEach(b => b.addEventListener("click", closeRedirectModal));
+    $("#redirect-save").addEventListener("click", saveRedirect);
     $("#rfp-back").addEventListener("click", () => { state.currentRfp = null; renderRfps(); });
     $("#history-select").addEventListener("change", () => openHistory($("#history-select").value));
     $("#history-sort").addEventListener("change", () => renderHistory());
@@ -1108,6 +1112,7 @@
     if (p.error) { toast(p.error.message, "danger"); return; }
     state.currentRfp = p.data;
     state.currentRfpRows = rs.data || [];
+    await loadReassignments(state.currentRfpRows);
     location.hash = "#/rfps";
     $("#rfps-view").hidden = false;
     renderRfps();
@@ -1146,14 +1151,17 @@
         `<td class="rfp-imp-q">${esc(r.question.slice(0, 200))}${r.include ? "" : '<small class="text-secondary">Excluded from document</small>'}</td>` +
         `<td><span class="badge ${b.cls} badge-sm">${b.label}</span>${kbid ? `<div><a href="#" class="text-sm rfp-detail-view" data-view="${esc(kbid)}">${esc(kbid)}</a></div>` : ""}</td>` +
         `<td class="text-sm rfp-detail-ans">${esc((r.answer || "—").slice(0, 160))}</td>` +
-        `<td class="text-sm">${r.assigned_to ? esc(nameOf(r.assigned_to)) : '<span class="text-secondary">—</span>'}</td>` +
+        `<td class="text-sm">${r.assigned_to ? esc(nameOf(r.assigned_to)) : '<span class="text-secondary">—</span>'}${redirectNoteHtml(r)}</td>` +
         `<td class="text-right"></td>`;
       const cell = tr.lastChild;
       const actions = el("div", "cluster cluster-sm"); actions.style.justifyContent = "flex-end";
-      if (r.status === "pending" && !fin && (mine || isAdmin())) {
+      if (r.status === "pending" && !fin && (mine || isAdmin() || canManage)) {
         const btn = el("button", "button button-primary button-sm", '<i class="fa-solid fa-pen"></i> Review');
         btn.addEventListener("click", e => { e.stopPropagation(); openApproveModal(r); });
-        actions.append(btn);
+        const rd = el("button", "button button-secondary button-sm", '<i class="fa-solid fa-share"></i> Redirect');
+        rd.title = "Hand this question to someone better placed to answer it";
+        rd.addEventListener("click", e => { e.stopPropagation(); openRedirectModal(r); });
+        actions.append(btn, rd);
       } else {
         actions.append(el("span", `badge ${st.cls} badge-sm`, st.label));
       }
@@ -1162,6 +1170,68 @@
       if (view) view.addEventListener("click", e => { e.preventDefault(); e.stopPropagation(); const q = state.questions.find(x => x.id === view.dataset.view); if (q) openDrawer(q); });
       tb.appendChild(tr);
     });
+  }
+
+  // ---- redirect: hand a question to someone better placed (v0.15.0) -------
+  // A DRI who opens an assigned question and legitimately says "this isn't
+  // mine" can pass it on directly. The handover is logged with a reason so the
+  // next owner knows why it reached them, and so a question can't quietly
+  // circulate without anyone owning it.
+
+  async function loadReassignments(rows) {
+    state.rfpReassign = {};
+    const ids = (rows || []).map(r => r.id);
+    if (!ids.length) return;
+    const { data } = await state.sb.from("rfp_row_reassignments")
+      .select("rfp_row_id,from_user,to_user,note,by_user,at")
+      .in("rfp_row_id", ids).order("at");
+    (data || []).forEach(x => { state.rfpReassign[x.rfp_row_id] = x; });   // keep the latest
+  }
+
+  function redirectNoteHtml(r) {
+    const x = state.rfpReassign[r.id];
+    if (!x) return "";
+    const why = x.note ? `: ${esc(x.note)}` : "";
+    return `<div class="text-secondary text-xs" title="${esc(x.note || "")}">` +
+           `<i class="fa-solid fa-share fa-xs"></i> redirected by ${esc(nameOf(x.by_user))}${why}</div>`;
+  }
+
+  function openRedirectModal(row) {
+    state.redirectRow = row;
+    $("#redirect-question").textContent = row.question;
+    $("#redirect-current").textContent = row.assigned_to
+      ? `Currently with ${nameOf(row.assigned_to)}.`
+      : "Nobody is assigned to this question yet.";
+    const sel = $("#redirect-to");
+    sel.innerHTML = `<option value="">— Choose a person —</option>`;
+    editorProfiles()
+      .filter(p => p.user_id !== row.assigned_to)
+      .forEach(p => sel.appendChild(new Option(p.full_name || p.email, p.user_id)));
+    $("#redirect-note").value = "";
+    $("#redirect-error").hidden = true;
+    openOverlay("#redirect-overlay");
+  }
+  function closeRedirectModal() {
+    $("#redirect-overlay").hidden = true; document.body.style.overflow = ""; state.redirectRow = null;
+  }
+
+  async function saveRedirect() {
+    const row = state.redirectRow; if (!row) return;
+    const err = $("#redirect-error"); err.hidden = true;
+    const to = $("#redirect-to").value;
+    if (!to) { err.textContent = "Choose who should answer this question."; err.hidden = false; return; }
+    const btn = $("#redirect-save"); btn.classList.add("is-loading"); btn.disabled = true;
+
+    const { error } = await state.sb.rpc("rfp_row_reassign", {
+      p_row_id: row.id, p_to: to, p_note: $("#redirect-note").value.trim() || null
+    });
+    btn.classList.remove("is-loading"); btn.disabled = false;
+    if (error) { err.textContent = error.message; err.hidden = false; return; }
+
+    closeRedirectModal();
+    toast(`Redirected to ${nameOf(to)}`);
+    await Promise.all([openRfp(row.rfp_id), loadRfpTodos()]);
+    renderUserBox();
   }
 
   // ---- approve modal ------------------------------------------------------
