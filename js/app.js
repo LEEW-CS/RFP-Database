@@ -65,6 +65,7 @@
     currentRfpRows: [], // its rows
     rfpTodos: [],       // pending rfp_rows assigned to me
     approveRow: null,   // row open in the approve modal
+    approveAssets: [],  // assets attached to that row (v0.14.0)
     currentHistory: null, currentHistoryRows: [],   // RFP History detail
     resSection: null,   // section being added to in the Library modal
     resEditing: null,   // resource open in the edit modal (null = adding new)
@@ -688,6 +689,7 @@
     $("#create-save").addEventListener("click", saveCreateProject);
     $("#approve-save").addEventListener("click", saveApprove);
     $("#approve-addkb").addEventListener("change", () => { $("#approve-kb-fields").hidden = !$("#approve-addkb").checked; });
+    wireApproveAssetPicker();
     $("#rfp-back").addEventListener("click", () => { state.currentRfp = null; renderRfps(); });
     $("#history-select").addEventListener("change", () => openHistory($("#history-select").value));
     $("#history-sort").addEventListener("change", () => renderHistory());
@@ -869,9 +871,9 @@
     renderImportRows();
   }
 
-  // A row is auto-approved when it is a strong match whose KB answer is used
-  // untouched. Everything else that's included needs a DRI to approve it.
-  const rowIsAuto = (r) => r.band === "strong" && !!r.answer && !r.overridden;
+  // v0.14.0 — auto-approve removed. A strong match pre-fills the answer but
+  // never approves it: every included row is read and approved by a named DRI
+  // before it can reach a client document.
 
   function renderImportStats() {
     const rows = state.imp.rows;
@@ -880,10 +882,9 @@
     $("#imp-stat-partial").textContent = rows.filter(r => r.band === "partial").length;
     $("#imp-stat-gap").textContent = rows.filter(r => r.band === "gap").length;
     const included = rows.filter(r => r.include);
-    const auto = included.filter(rowIsAuto).length;
-    const need = included.length - auto;
-    $("#import-action-summary").textContent = `${auto} answer${auto === 1 ? "" : "s"} auto-approved · ${need} need${need === 1 ? "s" : ""} DRI review`;
-    $("#import-action-sub").textContent = "Create a response project to assign DRIs. The response document can be produced once every answer is approved.";
+    const filled = included.filter(r => r.answer).length;
+    $("#import-action-summary").textContent = `${included.length} answer${included.length === 1 ? "" : "s"} to review · ${filled} pre-filled from the knowledge base`;
+    $("#import-action-sub").textContent = "Create a response project to assign DRIs. Every included answer is approved by a person before the response document can be produced.";
   }
 
   function renderImportRows() {
@@ -956,14 +957,15 @@
      RESPONSE PROJECTS — create → DRI approval → finalise (v0.6.0)
      ======================================================================== */
   const RFP_STATUS = {
-    auto:     { cls: "badge-success", label: "Auto-approved" },
+    auto:     { cls: "badge-neutral", label: "Auto-approved (legacy)" },  // pre-v0.14.0 rows only
+    excluded: { cls: "badge-neutral", label: "Excluded" },
     pending:  { cls: "badge-warning", label: "Awaiting DRI" },
     approved: { cls: "badge-success", label: "Approved" }
   };
 
   // ---- create project from the current import session ---------------------
   function pendingImportRows() {
-    return state.imp.rows.filter(r => r.include && !rowIsAuto(r));
+    return state.imp.rows.filter(r => r.include);
   }
 
   function defaultAssignee(r) {
@@ -977,16 +979,17 @@
   function openCreateModal() {
     if (!state.imp || !state.imp.rows) return;
     const pending = pendingImportRows();
-    const auto = state.imp.rows.filter(r => r.include && rowIsAuto(r)).length;
+    const filled = pending.filter(r => r.band === "strong" && r.answer).length;
     $("#create-name").value = state.imp.fileName.replace(/\.(xlsx|xls|xlsm|csv)$/i, "");
     $("span", $("#create-auto-note")).textContent =
-      `${auto} strong match${auto === 1 ? "" : "es"} to approved knowledge-base answers will be auto-approved.`;
+      `Every included answer is approved by a DRI before it can be written to the client document.` +
+      (filled ? ` ${filled} ${filled === 1 ? "is" : "are"} pre-filled from a strong knowledge-base match.` : "");
     const editors = editorProfiles();
     const opts = (selId) => `<option value="">— Choose a DRI —</option>` +
       editors.map(p => `<option value="${p.user_id}" ${p.user_id === selId ? "selected" : ""}>${esc(p.full_name || p.email)}</option>`).join("");
     const list = $("#create-assign-list");
     if (!pending.length) {
-      list.innerHTML = `<div class="alert alert-success banner-inline"><i class="alert-icon fa-solid fa-circle-check"></i><span>Nothing needs review — every included answer is a strong match. You can finalise right after creating.</span></div>`;
+      list.innerHTML = `<div class="alert alert-warning banner-inline"><i class="alert-icon fa-solid fa-triangle-exclamation"></i><span>No questions are included — tick at least one row on the review screen before creating the project.</span></div>`;
     } else {
       list.innerHTML = pending.map(r => {
         const b = IMP_BAND[r.band];
@@ -1038,14 +1041,13 @@
 
     // 3) question rows
     const rowsIns = state.imp.rows.map(r => {
-      const auto = r.include && rowIsAuto(r);
       const top = r.chosenId ? (r.cands.find(c => c.q.id === r.chosenId) || null) : null;
       return {
         rfp_id: rfpId, seq: r.seq, row_idx: r.rowIdx, question: r.question,
         matched_qid: r.chosenId, score: top ? Math.round(top.score * 1000) / 1000 : null,
         band: r.band, answer: r.answer || null, include: r.include,
-        status: r.include ? (auto ? "auto" : "pending") : "auto",
-        assigned_to: (r.include && !auto) ? (assignments[r.seq] || null) : null
+        status: r.include ? "pending" : "excluded",
+        assigned_to: r.include ? (assignments[r.seq] || null) : null
       };
     });
     const r2 = await state.sb.from("rfp_rows").insert(rowsIns);
@@ -1114,7 +1116,7 @@
   function renderRfpDetail() {
     const p = state.currentRfp, rows = state.currentRfpRows;
     const included = rows.filter(r => r.include);
-    const auto = included.filter(r => r.status === "auto").length;
+    const auto = rows.length - included.length;            // tile relabelled "Excluded"
     const approved = included.filter(r => r.status === "approved").length;
     const pending = included.filter(r => r.status === "pending").length;
     const fin = p.status === "finalised";
@@ -1163,29 +1165,141 @@
   }
 
   // ---- approve modal ------------------------------------------------------
+  // v0.14.0: the reviewer can edit the answer, attach supporting assets, and
+  // bank the customised answer back into the knowledge base as a new Q&A.
+
+  const kbAnswerFor = (qid) => { const q = state.questions.find(x => x.id === qid); return q ? (q.answer || "") : ""; };
+
   function openApproveModal(row) {
     state.approveRow = row;
+    state.approveAssets = [];
     const b = IMP_BAND[row.band] || IMP_BAND.gap;
     $("#approve-question").textContent = row.question;
     $("#approve-matchinfo").innerHTML = row.matched_qid
-      ? `Matched to <strong>${esc(row.matched_qid)}</strong> (${b.label.toLowerCase()}${row.score ? `, ${Math.round(row.score * 100)}%` : ""}). Edit the answer if needed, then approve.`
+      ? `Matched to <strong>${esc(row.matched_qid)}</strong> (${b.label.toLowerCase()}${row.score ? `, ${Math.round(row.score * 100)}%` : ""}). Edit the answer and attachments to suit this client, then approve.`
       : "No knowledge-base match — write the answer to send.";
     $("#approve-answer").value = row.answer || "";
     $("#approve-include").checked = !!row.include;
-    // offer add-to-KB only for rows that aren't already tied to a KB question
+
+    // ---- write-back: a customised answer becomes its own canonical Q&A ----
     const kbBlock = $("#approve-kb-block");
     const cats = isAdmin() ? state.categories : state.categories.filter(c => state.myCategoryIds.has(c.id));
-    if (!row.matched_qid && !row.added_qid && cats.length) {
+    const parentCat = row.matched_qid ? (state.questions.find(q => q.id === row.matched_qid) || {}).category : null;
+    if (!row.added_qid && (cats.length || parentCat)) {
       kbBlock.hidden = false;
-      $("#approve-addkb").checked = false;
-      $("#approve-kb-fields").hidden = true;
       const sel = $("#approve-kb-cat"); sel.innerHTML = "";
-      cats.forEach(c => sel.appendChild(new Option(c.name, c.id)));
+      (cats.length ? cats : state.categories).forEach(c => sel.appendChild(new Option(c.name, c.id)));
+      if (parentCat) { const pid = catIdByName(parentCat); if (pid > 0) sel.value = String(pid); }
+      // default ON where the reviewer has genuinely written something new
+      const drifted = !row.matched_qid || ($("#approve-answer").value.trim() !== kbAnswerFor(row.matched_qid).trim());
+      $("#approve-addkb").checked = drifted;
+      $("#approve-kb-fields").hidden = !drifted;
+      $("#approve-kb-hint").textContent = row.matched_qid
+        ? `Saved as a new question linked to ${row.matched_qid}, with any attachments carried across — so this more specific wording is matchable next time.`
+        : "Saved as a new question so this answer is matchable next time.";
     } else kbBlock.hidden = true;
+
     $("#approve-error").hidden = true;
+    $("#approve-asset-picker").hidden = true;
     openOverlay("#approve-overlay");
+    loadRowAssets(row);
   }
-  function closeApproveModal() { $("#approve-overlay").hidden = true; document.body.style.overflow = ""; state.approveRow = null; }
+  function closeApproveModal() {
+    $("#approve-overlay").hidden = true; document.body.style.overflow = "";
+    state.approveRow = null; state.approveAssets = [];
+  }
+
+  // ---- attachments bound to this RFP answer row ---------------------------
+  // On first open a row inherits whatever is attached to the question it
+  // matched, so the certificate that belongs with IS-01 travels with it.
+  async function loadRowAssets(row) {
+    const box = $("#approve-assets"); if (!box) return;
+    box.innerHTML = `<span class="spinner spinner--sm" role="status" aria-label="Loading"></span>`;
+    let { data: bindings } = await state.sb.from("rfp_row_resources").select("resource_id").eq("rfp_row_id", row.id);
+    bindings = bindings || [];
+
+    if (!bindings.length && row.matched_qid && !row.assets_inherited) {
+      const { data: inherited } = await state.sb.from("question_resources").select("resource_id").eq("question_id", row.matched_qid);
+      if (inherited && inherited.length) {
+        const ins = inherited.map(x => ({ rfp_row_id: row.id, resource_id: x.resource_id, added_by: state.user.id }));
+        const { error } = await state.sb.from("rfp_row_resources").insert(ins);
+        if (!error) bindings = inherited;
+      }
+      row.assets_inherited = true;
+    }
+    if (!state.resources || !state.resources.length) {
+      const { data: res } = await state.sb.from("resources").select("*");
+      state.resources = res || [];
+    }
+    state.approveAssets = bindings.map(x => state.resources.find(r => r.id === x.resource_id)).filter(Boolean);
+    renderRowAssets(row);
+  }
+
+  function renderRowAssets(row) {
+    const box = $("#approve-assets"); if (!box) return;
+    const list = state.approveAssets;
+    $("#approve-asset-count").textContent = list.length;
+    if (!list.length) { box.innerHTML = `<p class="text-secondary text-sm">Nothing attached. Add a certificate, report or brochure the client has asked to see.</p>`; return; }
+    box.innerHTML = "";
+    list.forEach(r => {
+      const isLink = !r.file_ref && !!r.url;
+      const item = el("div", "cluster cluster-sm rfp-qa-asset");
+      item.innerHTML =
+        `<i class="fa-solid ${LIB_ICON[r.section] || "fa-paperclip"} text-secondary"></i>` +
+        `<span class="flex-1"><strong class="text-sm">${esc(r.name)}</strong> ` +
+        `<span class="badge badge-neutral badge-sm">${esc(r.section || "—")}</span>` +
+        (isLink ? ` <span class="badge badge-info badge-sm">link only</span>` : ` <span class="badge badge-info badge-sm">in ZIP</span>`) +
+        `</span>`;
+      const rm = el("button", "button button-tertiary button-sm", '<i class="fa-solid fa-xmark"></i>');
+      rm.type = "button"; rm.title = "Detach from this answer";
+      rm.addEventListener("click", async () => {
+        const { error } = await state.sb.from("rfp_row_resources").delete().eq("rfp_row_id", row.id).eq("resource_id", r.id);
+        if (error) return toast(error.message, "danger");
+        state.approveAssets = state.approveAssets.filter(x => x.id !== r.id);
+        renderRowAssets(row);
+      });
+      item.appendChild(rm);
+      box.appendChild(item);
+    });
+  }
+
+  function wireApproveAssetPicker() {
+    const btn = $("#approve-asset-add-btn"); if (!btn) return;
+    const picker = $("#approve-asset-picker"), catSel = $("#approve-asset-cat"),
+          itemSel = $("#approve-asset-item"), confirmBtn = $("#approve-asset-confirm");
+    btn.addEventListener("click", () => {
+      picker.hidden = !picker.hidden;
+      if (picker.hidden) return;
+      catSel.innerHTML = `<option value="">— Category —</option>`;
+      LIB_SECTIONS.forEach(sec => {
+        const n = (state.resources || []).filter(r => (r.section || "Certifications") === sec).length;
+        if (n) catSel.appendChild(new Option(`${sec} (${n})`, sec));
+      });
+      itemSel.innerHTML = `<option value="">— Pick an asset —</option>`; itemSel.disabled = true; confirmBtn.disabled = true;
+    });
+    catSel.addEventListener("change", () => {
+      const sec = catSel.value;
+      itemSel.innerHTML = `<option value="">— Pick an asset —</option>`;
+      itemSel.disabled = !sec; confirmBtn.disabled = true;
+      if (!sec) return;
+      const bound = new Set(state.approveAssets.map(r => r.id));
+      (state.resources || []).filter(r => (r.section || "Certifications") === sec && !bound.has(r.id))
+        .forEach(r => itemSel.appendChild(new Option(r.name, r.id)));
+    });
+    itemSel.addEventListener("change", () => { confirmBtn.disabled = !itemSel.value; });
+    confirmBtn.addEventListener("click", async () => {
+      const row = state.approveRow;
+      if (!row || !itemSel.value) return;
+      const { error } = await state.sb.from("rfp_row_resources")
+        .insert({ rfp_row_id: row.id, resource_id: itemSel.value, added_by: state.user.id });
+      if (error) return toast(error.message, "danger");
+      const res = (state.resources || []).find(r => r.id === itemSel.value);
+      if (res) state.approveAssets.push(res);
+      picker.hidden = true;
+      toast("Asset attached");
+      renderRowAssets(row);
+    });
+  }
 
   async function saveApprove() {
     const row = state.approveRow; if (!row) return;
@@ -1195,18 +1309,35 @@
     if (include && !answer) { err.textContent = "Write the answer, or untick Include to leave this question out."; err.hidden = false; return; }
     const btn = $("#approve-save"); btn.classList.add("is-loading"); btn.disabled = true;
 
+    // ---- write-back: bank the reviewed answer as its own canonical Q&A ----
+    // Every customised answer becomes a NEW question linked to the one it came
+    // from, so the master set accumulates more specific matchable wordings
+    // rather than overwriting an attested answer. A row whose question and
+    // answer already exist verbatim reuses that entry instead of duplicating.
     let addedQid = row.added_qid || null;
     if (!$("#approve-kb-block").hidden && $("#approve-addkb").checked && answer) {
-      const catId = parseInt($("#approve-kb-cat").value, 10);
-      const tier = $("#approve-kb-tier").value;
-      const id = nextIdForCategory(catId);
-      const src = `RFP response · ${new Date().toISOString().slice(0, 10)}`;
-      const q1 = await state.sb.from("canonical_questions").insert({ id, category_id: catId, question: row.question, tier, status: "approved", needs_rework: false, sample_only: false });
-      if (q1.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = q1.error.message; err.hidden = false; return; }
-      await state.sb.from("canonical_answers").insert({ question_id: id, answer, answer_source: src, updated_by: state.user.id });
-      await state.sb.from("answer_versions").insert({ question_id: id, answer, answer_source: src, note: `Approved in RFP response by ${state.profile.email}`, created_by: state.user.id });
-      state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status: "approved", question: row.question, answer });
-      addedQid = id;
+      const norm = (t) => (t || "").toLowerCase().replace(/\s+/g, " ").trim();
+      const dupe = state.questions.find(q => norm(q.question) === norm(row.question) && norm(q.answer) === norm(answer));
+      if (dupe) {
+        addedQid = dupe.id;
+      } else {
+        const catId = parseInt($("#approve-kb-cat").value, 10);
+        const tier = $("#approve-kb-tier").value;
+        const id = nextIdForCategory(catId);
+        const src = `RFP response · ${state.currentRfp ? state.currentRfp.name : "RFP"} · ${new Date().toISOString().slice(0, 10)}`;
+        const q1 = await state.sb.from("canonical_questions").insert({
+          id, category_id: catId, question: row.question, tier, status: "approved",
+          needs_rework: false, sample_only: false, variant_of: row.matched_qid || null
+        });
+        if (q1.error) { btn.classList.remove("is-loading"); btn.disabled = false; err.textContent = q1.error.message; err.hidden = false; return; }
+        await state.sb.from("canonical_answers").insert({ question_id: id, answer, answer_source: src, updated_by: state.user.id });
+        await state.sb.from("answer_versions").insert({ question_id: id, answer, answer_source: src, note: `Approved in RFP response by ${state.profile.email}`, created_by: state.user.id });
+        // carry the attachments across so the evidence travels with the answer
+        const assets = (state.approveAssets || []).map(r => ({ question_id: id, resource_id: r.id }));
+        if (assets.length) await state.sb.from("question_resources").insert(assets);
+        state.questions.push({ id, category: (state.categories.find(c => c.id === catId) || {}).name, tier, status: "approved", question: row.question, answer, variant_of: row.matched_qid || null });
+        addedQid = id;
+      }
     }
 
     const { error } = await state.sb.from("rfp_rows").update({
@@ -1221,6 +1352,57 @@
     if (addedQid) await loadQuestions();
     await Promise.all([openRfp(row.rfp_id), loadRfpTodos()]);
     renderUserBox();
+  }
+
+  // ---- attachments at finalise -------------------------------------------
+  // Files go into a ZIP that accompanies the response. Videos (and anything
+  // else that is a link rather than a stored file) are referenced by URL —
+  // they are too large to bundle and the client should stream them.
+  async function collectRfpAttachments(p, rows) {
+    const ids = rows.map(r => r.id);
+    if (!ids.length) return [];
+    const { data: links } = await state.sb.from("rfp_row_resources").select("rfp_row_id,resource_id").in("rfp_row_id", ids);
+    if (!links || !links.length) return [];
+    if (!state.resources || !state.resources.length) {
+      const { data: res } = await state.sb.from("resources").select("*");
+      state.resources = res || [];
+    }
+    const rowById = {}; rows.forEach(r => (rowById[r.id] = r));
+    const isVideo = (r) => /video/i.test(r.section || "") || /\.(mp4|mov|avi|wmv|webm)$/i.test(r.url || "");
+    const out = [];
+    let n = 0;
+    rows.forEach(r => {                                  // keep document order
+      links.filter(l => l.rfp_row_id === r.id).forEach(l => {
+        const res = state.resources.find(x => x.id === l.resource_id);
+        if (!res) return;
+        const inZip = !!res.file_ref && !isVideo(res);
+        out.push({ n: inZip ? ++n : null, row: rowById[r.id], res, inZip });
+      });
+    });
+    return out;
+  }
+
+  async function buildAttachmentZip(p, bundle) {
+    const files = (bundle || []).filter(a => a.inZip);
+    if (!files.length) return null;
+    if (!window.JSZip) throw new Error("ZIP library not loaded — check your connection and reload.");
+    const zip = new JSZip();
+    const manifest = [`${p.name} — supporting documents`, `Generated ${new Date().toISOString().slice(0, 10)}`, ""];
+    for (const a of files) {
+      const dl = await state.sb.storage.from("library").download(a.res.file_ref);
+      if (dl.error) { manifest.push(`Attachment ${a.n} — ${a.res.name}: COULD NOT BE RETRIEVED (${dl.error.message})`); continue; }
+      const ext = (a.res.file_ref.match(/\.[A-Za-z0-9]+$/) || [""])[0];
+      const safe = a.res.name.replace(/[^\w.\- ]+/g, "_").slice(0, 80);
+      zip.file(`Attachment ${String(a.n).padStart(2, "0")} - ${safe}${ext}`, await dl.data.arrayBuffer());
+      manifest.push(`Attachment ${a.n} — ${a.res.name}  (Q${a.row.seq})`);
+    }
+    const online = (bundle || []).filter(a => !a.inZip);
+    if (online.length) {
+      manifest.push("", "Available online:");
+      online.forEach(a => manifest.push(`  ${a.res.name}  (Q${a.row.seq}) — ${a.res.url || "link not recorded"}`));
+    }
+    zip.file("README.txt", manifest.join("\n"));
+    return await zip.generateAsync({ type: "blob" });
   }
 
   // ---- finalise -----------------------------------------------------------
@@ -1242,7 +1424,39 @@
         writeCol = aoa.reduce((m, r) => Math.max(m, r.length), 0);
         XLSX.utils.sheet_add_aoa(ws, [["Cloudstaff Response"]], { origin: { r: p.header_row, c: writeCol } });
       }
-      rows.forEach(r => XLSX.utils.sheet_add_aoa(ws, [[r.answer]], { origin: { r: r.row_idx, c: writeCol } }));
+      // ---- attachments: number them, reference them in-cell, bundle later --
+      const bundle = await collectRfpAttachments(p, rows);   // [{n, row, res, inZip}]
+      const byRow = {};
+      bundle.forEach(a => (byRow[a.row.id] || (byRow[a.row.id] = [])).push(a));
+
+      rows.forEach(r => {
+        const atts = byRow[r.id] || [];
+        let cell = r.answer;
+        if (atts.length) {
+          const files = atts.filter(a => a.inZip).map(a => `Attachment ${a.n} — ${a.res.name}`);
+          const links = atts.filter(a => !a.inZip).map(a => `${a.res.name}: ${a.res.url}`);
+          if (files.length) cell += `\n\nSupporting documents (see accompanying ZIP): ${files.join("; ")}.`;
+          if (links.length) cell += `\n\nOnline: ${links.join("; ")}.`;
+        }
+        XLSX.utils.sheet_add_aoa(ws, [[cell]], { origin: { r: r.row_idx, c: writeCol } });
+      });
+
+      // ---- manifest sheet so the evaluator can see what came with the file --
+      if (bundle.length) {
+        const man = [["Ref", "Question #", "Question", "Document", "Type", "Delivery"]].concat(
+          bundle.map(a => [
+            a.inZip ? `Attachment ${a.n}` : "Online link",
+            a.row.seq, String(a.row.question).slice(0, 300),
+            a.res.name, a.res.section || "",
+            a.inZip ? "Included in accompanying ZIP" : (a.res.url || "")
+          ]));
+        const mws = XLSX.utils.aoa_to_sheet(man);
+        mws["!cols"] = [{ wch: 14 }, { wch: 10 }, { wch: 60 }, { wch: 40 }, { wch: 18 }, { wch: 46 }];
+        const sheetName = "Cloudstaff Attachments";
+        if (wb.SheetNames.includes(sheetName)) delete wb.Sheets[sheetName];
+        else wb.SheetNames.push(sheetName);
+        wb.Sheets[sheetName] = mws;
+      }
       const ref = XLSX.utils.decode_range(ws["!ref"]);
       if (writeCol > ref.e.c) { ref.e.c = writeCol; ws["!ref"] = XLSX.utils.encode_range(ref); }
       const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
@@ -1255,6 +1469,19 @@
         new Blob([out], { type: "application/octet-stream" }), { upsert: true });
       if (up.error) throw new Error("Couldn't store the finalised file: " + up.error.message);
       downloadBlob(new Blob([out], { type: "application/octet-stream" }), outName);
+
+      // 2a) ZIP of the attached files, alongside the workbook
+      try {
+        const zipBlob = await buildAttachmentZip(p, bundle);
+        if (zipBlob) {
+          const zipPath = finalPath.replace(/\.xlsx$/i, "_attachments.zip");
+          const upZip = await state.sb.storage.from("rfps").upload(zipPath, zipBlob, { upsert: true });
+          if (upZip.error) toast("Attachment bundle not stored: " + upZip.error.message, "danger");
+          downloadBlob(zipBlob, `${base} — Cloudstaff attachments.zip`);
+        }
+      } catch (ze) {
+        toast("Attachment bundle couldn't be built: " + (ze.message || ze), "danger");
+      }
 
       // 2b) branded Word response document (v0.13.0) — best-effort alongside the workbook
       try {
